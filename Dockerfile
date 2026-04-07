@@ -15,7 +15,6 @@ ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 
 RUN npm run build
 
-
 FROM nginx:alpine
 
 COPY --from=builder /app/dist /usr/share/nginx/html
