@@ -946,10 +946,16 @@ function App() {
                     </label>
                     <input
                       id="walrus-file-input"
-                      className="text-input"
+                      className="file-input-native"
                       type="file"
                       onChange={handleFileSelection}
                     />
+                    <label
+                      className="file-picker-btn"
+                      htmlFor="walrus-file-input"
+                    >
+                      {uploadFile ? "Choose another file" : "Choose file"}
+                    </label>
                   </div>
 
                   {uploadFile ? (
