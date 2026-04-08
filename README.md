@@ -1,363 +1,236 @@
-# Sui zkLogin Wallet with Enoki and Walrus
+# Walrus Vault
 
-This project is a small Sui web wallet built to demonstrate how a user can sign in with Google, get a zkLogin-based Sui wallet, read token balances on Sui testnet, upload a binary file to Walrus, and list the Walrus Blob objects owned by the connected address without installing a browser wallet extension.
+Walrus Vault is a zkLogin-enabled Sui app that lets a user:
 
-It is intentionally narrow in scope. It focuses on the core onboarding path:
+1. Sign in with Google through Enoki.
+2. Create named Seal whitelists in the UI.
+3. Upload files to Walrus either as plain blobs or encrypted blobs.
+4. Attach encrypted uploads to a selected whitelist.
+5. Manage whitelist members on Sui.
+6. Download files, automatically decrypting encrypted files when the connected wallet has access.
 
-1. Sign in with Google.
-2. Create or restore the user's zkLogin wallet.
-3. Read the wallet address.
-4. Load balances from Sui testnet.
-5. Upload a binary file to Walrus testnet.
-6. List the Walrus files owned by the connected wallet address.
-7. Log out of the dApp session.
+The app uses local storage for dashboard metadata and list names, Sui for access control, Seal for key release, and Walrus for file bytes.
 
-## What this project is trying to teach
+## Architecture
 
-This repository is useful if you want to understand these pieces together:
+| Layer         | Purpose                | Stored data                                                           |
+| :------------ | :--------------------- | :-------------------------------------------------------------------- |
+| Local storage | Dashboard memory       | File name, blob ID, key ID, whitelist name, whitelist members, cap ID |
+| Sui           | Access control         | Shared Whitelist object and owner Cap object                          |
+| Seal          | Encryption key service | Key shares gated by `seal_approve`                                    |
+| Walrus        | Blob storage           | Plain bytes or encrypted bytes                                        |
 
-- what a Sui zkLogin wallet is
-- what Enoki does in the zkLogin flow
-- how Google OAuth is connected to wallet creation
-- how a React app can integrate the login flow
-- how to read balances from Sui once the account is connected
-- how Walrus stores binary blobs offchain while keeping ownership on Sui
-- how to list Walrus Blob objects owned by a Sui address
+## Current UX
 
-## Core technologies
+### Whitelists
 
-### Sui
+Whitelists are created explicitly in the UI.
 
-Sui is the blockchain this app connects to. In this project, the app is configured for `testnet`, not mainnet.
+- Each whitelist has a local display name.
+- Each whitelist maps to one shared `Whitelist` object and one owned `Cap` object on Sui.
+- The creator is added to the whitelist automatically on-chain during creation.
+- Members can be added or removed from the list in the UI.
 
-The app uses a Sui client to:
+### Uploads
 
-- resolve the connected account
-- request balances owned by that account
-- fetch coin metadata for better balance display
-- list Walrus Blob objects owned by that account
+Uploads support two modes:
 
-### Walrus
+- Plain upload: the file is uploaded directly to Walrus.
+- Encrypted upload: the browser encrypts the file with Seal and requires you to choose a whitelist first.
 
-Walrus is the decentralized blob storage layer used by this app for file uploads.
-
-In this project, Walrus is used in two ways:
-
-- the public Walrus testnet publisher stores uploaded files as blobs
-- the connected Sui address becomes the owner of the resulting Walrus `Blob` object and stores blob attributes on Sui when possible
-
-That split is important:
-
-- the file bytes live in Walrus
-- ownership, storage duration, and blob metadata live on Sui as objects / attributes
-
-This makes Walrus a better fit than storing raw file bytes directly onchain.
-
-### Public Walrus testnet publisher
-
-This app uses the public Walrus testnet publisher HTTP API for uploads.
-
-That means the current implementation does **not** require the user to hold test WAL just to upload through this UI. The publisher handles the storage write on testnet and sends the resulting blob object to the connected address.
-
-The app then lists the files by querying Sui for Walrus `Blob` objects owned by that address.
-
-This is different from a direct Walrus SDK write flow where the user's wallet signs the registration and certification transactions itself.
-
-### zkLogin
-
-zkLogin is a Sui feature that lets a user authenticate with a Web2 identity provider such as Google and derive a Sui address from that login, instead of managing a traditional wallet seed phrase in the UI.
-
-Conceptually, zkLogin combines:
-
-- an OpenID Connect provider such as Google
-- a JWT returned by that provider
-- Sui-specific cryptographic proofs
-- a user salt and ephemeral signing material
-
-The result is a blockchain address that is tied to the user's identity for this app configuration.
-
-### Enoki
-
-Enoki is Mysten's developer platform that simplifies zkLogin integration. Instead of manually implementing the entire nonce, salt, proof, and session workflow yourself, Enoki handles the hard parts needed for a production-style zkLogin onboarding flow.
-
-In this project, Enoki is responsible for:
-
-- creating the zkLogin nonce
-- managing the Google login integration for the wallet flow
-- resolving the user's zkLogin wallet address from the Google JWT
-- wiring the wallet into the Sui wallet standard / dApp Kit flow
-
-Without Enoki, you would need to implement and operate more of the zkLogin backend-sensitive flow yourself.
-
-### Google OAuth
-
-Google is the identity provider used in this app. The user signs in through Google, Google returns an authentication result, and that result is used in the zkLogin flow.
-
-This project uses a Google OAuth Web Client ID. The client secret is not needed in the frontend and should never be exposed in a Vite app.
-
-### React + Vite
-
-The UI is built with React and bundled with Vite. Vite is used for local development, environment variables, and production builds.
-
-### `@mysten/dapp-kit-react`
-
-This package provides wallet integration primitives for Sui apps. In this project it is used to:
-
-- create the dApp Kit provider
-- access the current account and wallet
-- access the current Sui client and network
-- connect and disconnect the Enoki wallet
-
-### `@tanstack/react-query`
-
-React Query is used for loading balances from Sui and managing loading / error state around those requests.
-
-### `@mysten/walrus`
-
-The Walrus SDK is used here for Walrus-specific client helpers, especially:
-
-- resolving the Walrus `Blob` Move type for object listing
-- reading parsed Walrus blob objects from Sui by object ID
-- reading Walrus blob attributes when present
-
-### `@mysten/seal`
-
-The Seal SDK is now included for encryption and decryption helpers.
-
-This repo does not yet ship a published Seal access-policy Move package, so the
-frontend cannot offer a generic one-click decrypt button by itself. Seal
-decryption always depends on two app-specific pieces:
-
-- a deployed Move package that defines one or more `seal_approve*` functions
-- transaction-kind bytes that call the correct `seal_approve*` function for that
-  package
-
-The helper module lives in `src/seal.ts` and gives you the browser-side pieces
-that are reusable across policies:
-
-- create a `SealClient` with testnet key server defaults
-- encrypt bytes with `encryptWithSeal()`
-- create a wallet-backed `SessionKey` using `dAppKit.signPersonalMessage()`
-- build transaction-kind bytes for a `seal_approve` call
-- decrypt bytes with `decryptWithSeal()` once you have the correct approval PTB
-
-The default server config in `src/seal.ts` uses the public Mysten testnet
-committee aggregator:
-
-- committee object ID:
-  `0xb012378c9f3799fb5b1a7083da74a4069e3c3f1c93de0b27212a5799ce1e1e98`
-- aggregator URL:
-  `https://seal-aggregator-testnet.mystenlabs.com`
-
-That is enough to start encrypting on testnet, but you still need your own
-policy package ID and approval call shape before decryption can be wired into an
-app workflow such as Walrus download.
-
-## How the implementation works
-
-### High-level architecture
-
-The app has four main runtime responsibilities:
-
-1. Configure the Sui testnet client and dApp Kit.
-2. Register a Google-based Enoki wallet provider.
-3. Upload files to Walrus testnet through the public publisher.
-4. Render UI that connects the wallet, reads balances, and lists owned Walrus files.
-
-The relevant files are:
-
-- `src/dapp-kit.ts`
-- `src/RegisterEnokiWallets.tsx`
-- `src/App.tsx`
-- `src/walrus.ts`
-
-### 1. Sui client and dApp Kit setup
-
-In `src/dapp-kit.ts`, the app creates a dApp Kit instance for `testnet`.
-
-Key points:
-
-- the default network is `testnet`
-- the app creates a `SuiGrpcClient` for that network
-- `autoConnect: true` lets the app restore the wallet session when possible
-
-This file is the central network configuration for the app.
-
-### 2. Registering the Enoki wallet
-
-In `src/RegisterEnokiWallets.tsx`, the app registers a Google wallet backed by Enoki.
-
-That component does four important things:
-
-1. Reads the current Sui client and network from dApp Kit.
-2. Reads `VITE_ENOKI_API_KEY` and `VITE_GOOGLE_CLIENT_ID` from the frontend environment.
-3. Builds the redirect URL from the current browser location.
-4. Calls `registerEnokiWallets()` to create a Google wallet provider for the app.
-
-This is the bridge between the wallet framework and Enoki.
-
-### 3. Walrus upload and owned-file listing
-
-In `src/App.tsx`, the app also adds a Walrus workflow:
-
-1. The user selects a file, number of epochs, and whether the blob should be deletable.
-2. The app uploads the file with an HTTP `PUT` request to the public Walrus testnet publisher.
-3. The request includes `send_object_to=<current wallet address>` so the new Walrus `Blob` object is owned by the connected user.
-4. After the publisher returns the new blob object ID, the app attempts to write blob attributes on Sui using `writeBlobAttributesTransaction()`.
-5. The app polls and refetches the owned Walrus objects until the new object is visible in the wallet's file list.
-6. The app queries Sui for Walrus `Blob` objects owned by that address.
-7. For each object, the app loads Walrus blob metadata and renders a file list with object ID, blob ID, size, storage expiry, and download link.
-
-### 4. Wallet UI and balance loading
-
-In `src/App.tsx`, the app:
-
-- finds the registered Google Enoki wallet
-- triggers wallet connection when the user clicks the button
-- reads the connected account from dApp Kit
-- loads balances for the connected Sui address
-- uploads files to Walrus
-- loads Walrus Blob objects for the connected address
-- formats and displays coin balances
-- disconnects the wallet on logout
-
-The balance loading path looks like this:
-
-1. Get the current account address.
-2. Call `client.listBalances({ owner: account.address })`.
-3. For each coin type, call `client.getCoinMetadata()`.
-4. Display symbol, name, and formatted amount.
-
-The Walrus file listing path looks like this:
-
-1. Resolve the Walrus `Blob` type through the Walrus SDK.
-2. Call `client.listOwnedObjects({ owner, type })` for the connected address.
-3. Load each Walrus blob object by its Sui object ID.
-4. Read Walrus blob attributes when available.
-5. Render a download URL through the Walrus aggregator.
-
-## Walrus logic in this app
-
-This repository has three separate Walrus flows that are worth understanding: upload, retrieval, and download.
-
-### Upload flow
-
-When a user uploads a file, the app performs these steps:
-
-1. Read the selected browser `File` object.
-2. Validate the upload size against the public publisher limit.
-3. Build Walrus publisher query params:
-   `epochs`, `send_object_to=<connected Sui address>`, and either `deletable=true` or `permanent=true`.
-4. Send the file bytes to the public Walrus publisher with an HTTP `PUT`.
-5. Read the publisher response and extract:
-   the Walrus blob ID, the Sui blob object ID, and the storage end epoch.
-6. Attempt to write blob attributes on Sui for that blob object.
-7. Poll the owned-object query until the object appears in the list.
-
-The upload code lives primarily in `handleWalrusUpload()` in `src/App.tsx`.
-
-## Seal helper example
-
-The frontend now includes a reusable Seal helper module in `src/seal.ts`. A
-minimal usage pattern looks like this:
-
-```ts
-import {
-  buildTransactionKindBytes,
-  createSealApprovalTransaction,
-  createWalletBackedSessionKey,
-  decryptWithSeal,
-  encryptWithSeal,
-  hexStringToBytes,
-} from "./src/seal";
-
-const { encryptedObject } = await encryptWithSeal({
-  suiClient: client,
-  packageId: "0x...policy-package",
-  id: "0x...policy-id",
-  data: fileBytes,
-});
-
-const tx = createSealApprovalTransaction({
-  packageId: "0x...policy-package",
-  moduleName: "private_data",
-  idBytes: hexStringToBytes("0x...policy-id"),
-});
-
-const txBytes = await buildTransactionKindBytes(client, tx);
-
-const sessionKey = await createWalletBackedSessionKey({
-  address: account.address,
-  dAppKit,
-  packageId: "0x...policy-package",
-  suiClient: client,
-});
-
-const decryptedBytes = await decryptWithSeal({
-  suiClient: client,
-  encryptedBytes: encryptedObject,
-  sessionKey,
-  txBytes,
-});
-```
-
-Replace the package ID, module name, policy ID, and any extra PTB arguments with
-the ones required by your Move package. That policy-specific part is what decides
-who is allowed to decrypt.
-
-### What metadata is stored on Sui
-
-After upload, the app tries to write blob attributes on Sui with `writeBlobAttributesTransaction()`.
-
-The metadata payload is created in `src/walrus.ts` and currently includes:
+For encrypted uploads, local storage keeps the file metadata needed by the owner UI:
 
 - `fileName`
-- `contentType`
-- `originalSize`
+- `blobId`
+- `keyId`
+- `whitelistId`
+- `whitelistName`
+- `whitelistCapId`
+- `packageId`
 - `uploadedAt`
 
-This metadata is not stored in browser local storage. It is intended to be stored as Walrus blob attributes on Sui.
+### Downloads
 
-Important caveat: the metadata write is currently best-effort. If that transaction fails, the blob upload still succeeds, but the file may later fall back to a generated label instead of the original file name.
+- Plain files download directly from Walrus.
+- Encrypted files build a whitelist `seal_approve` PTB, request the key from Seal, decrypt in the browser, and then download.
 
-### Retrieval / file listing flow
+### Shared access
 
-The Files panel does not come from local app state. It is rebuilt from on-chain ownership each time the query runs.
+There is no shared backend database.
 
-The logic is:
+To share an encrypted file, the owner:
 
-1. Ask the Walrus SDK for the Move type of a Walrus `Blob` object.
-2. Query Sui for all owned objects of that type for the connected address.
-3. For each owned object ID:
-   try `walrusClient.walrus.getBlobObject(objectId)` first. If that fails, fall back to reading raw Sui object JSON and extracting the blob fields manually.
-4. Try to read blob attributes with `readBlobAttributes()`.
-5. Normalize the blob ID if it is stored in raw decimal form on the Sui object.
-6. Build the UI model for each file row.
+1. Adds the recipient to the chosen whitelist on Sui.
+2. Sends the `blobId` and `keyId` to the recipient out-of-band.
 
-If metadata is present, the UI uses:
+The recipient can use the Open Shared File section in the UI. Seal checks Sui access at decrypt time.
 
-- `fileName` from blob attributes
-- `contentType` from blob attributes
+## Project structure
 
-If metadata is missing, the UI falls back to a generated file label based on the blob ID.
+- `src/App.tsx`: main UI flow for login, whitelist creation, upload, download, and sharing.
+- `src/localWalrusMetadata.ts`: local storage model for files, deleted entries, and named whitelists.
+- `src/seal.ts`: reusable Seal client helpers.
+- `src/walrus.ts`: Walrus helpers and blob parsing.
+- `move/walrus_vault_policy/sources/whitelist.move`: Seal allowlist policy contract.
 
-### Download flow
+## Environment variables
 
-Downloads are served through the Walrus aggregator, not directly from Sui.
+Create a `.env` file in the project root.
 
-The logic is:
+```env
+VITE_ENOKI_API_KEY=your_enoki_api_key
+VITE_GOOGLE_CLIENT_ID=your_google_oauth_client_id
+VITE_SEAL_POLICY_PACKAGE_ID=0x_your_published_move_package
+```
 
-1. Convert the blob ID to the correct normalized base64url form when necessary.
-2. Build the aggregator URL: `/v1/blobs/<normalized blob id>`.
-3. Fetch the blob bytes from the aggregator.
-4. Determine the best MIME type:
-   use stored metadata if available, otherwise use the response content type, and if that is still generic, sniff the file header bytes.
-5. Create a browser `Blob` and trigger a file download.
-6. Add a file extension when the original name is missing one.
+`VITE_SEAL_POLICY_PACKAGE_ID` is required for whitelist creation and encrypted uploads.
 
-This is why the app can still download files correctly even when metadata is incomplete.
+## Local development
 
-## End-to-end login flow
+Install dependencies and start the dev server:
+
+```bash
+npm install
+npm run dev
+```
+
+Build and lint:
+
+```bash
+npm run lint
+npm run build
+```
+
+## Move contract
+
+The whitelist policy package lives in:
+
+`move/walrus_vault_policy`
+
+It exposes these main entry points:
+
+- `create_whitelist_entry`
+- `add_member`
+- `remove_member`
+- `seal_approve`
+
+The contract follows the Seal allowlist pattern:
+
+- one shared whitelist object defines access
+- the owner keeps a capability object
+- encrypted file key IDs are prefixed with the whitelist object ID
+- Seal approval succeeds only for addresses currently in the whitelist
+
+## Deploying the Move package to Sui testnet
+
+### Prerequisites
+
+You need:
+
+- Sui CLI installed
+- a testnet account selected in the CLI
+- enough testnet SUI for publish gas
+
+Check that the CLI exists:
+
+```bash
+sui --version
+```
+
+### 1. Configure the CLI for testnet
+
+List environments:
+
+```bash
+sui client envs
+```
+
+Switch to testnet if needed:
+
+```bash
+sui client switch --env testnet
+```
+
+Check the active address:
+
+```bash
+sui client active-address
+```
+
+### 2. Build the package
+
+```bash
+cd move/walrus_vault_policy
+sui move build
+```
+
+### 3. Publish the package
+
+From the same folder:
+
+```bash
+sui client publish --gas-budget 100000000
+```
+
+After publish, note the package ID from the output.
+
+### 4. Configure the frontend
+
+Set the published package ID in `.env`:
+
+```env
+VITE_SEAL_POLICY_PACKAGE_ID=0x...
+```
+
+Restart the Vite dev server after changing `.env`.
+
+## How the whitelist flow works
+
+### Create a list
+
+1. Enter a whitelist name in the UI.
+2. The app calls `create_whitelist_entry`.
+3. The shared `Whitelist` ID and owned `Cap` ID are read from the transaction result.
+4. The list is saved in local storage under the connected wallet.
+5. The creator remains on the whitelist by default.
+
+### Add or remove members
+
+1. Open the Whitelists section.
+2. Add a wallet address to a named list.
+3. The app sends `add_member` or `remove_member` on Sui.
+4. Local storage is updated to mirror the current list membership for the dashboard.
+
+### Upload an encrypted file
+
+1. Toggle Encrypt with Seal.
+2. Choose a whitelist.
+3. The app generates a `keyId` using `[whitelist_id][random_nonce]`.
+4. The file is encrypted in the browser with Seal.
+5. Ciphertext is uploaded to Walrus.
+6. The file row is stored locally with its `keyId` and linked whitelist metadata.
+
+### Download an encrypted file
+
+1. Click the download button on an encrypted file.
+2. The app builds a `seal_approve` PTB for the linked whitelist.
+3. Seal verifies the connected address against Sui.
+4. If approved, the app decrypts in-browser and downloads the plaintext.
+
+## Local storage notes
+
+The dashboard is intentionally local-first.
+
+- Clearing browser storage removes the local file and whitelist labels.
+- Walrus blobs are still on Walrus.
+- Whitelist access control is still on Sui.
+- If local metadata is lost, encrypted files still require the `keyId` to decrypt.
+
+## Notes
+
+- The app still uses Sui ownership to discover Walrus blob objects.
+- File metadata is no longer read from Sui blob attributes.
+- The Vite production build currently emits a large bundle warning, but the build completes successfully.
 
 This is the actual user flow in this project:
 

@@ -1,3 +1,4 @@
+import { CurrentAccountSigner, type DAppKit } from "@mysten/dapp-kit-core";
 import {
   SealClient,
   SessionKey,
@@ -18,12 +19,6 @@ export const DEFAULT_TESTNET_SEAL_SERVER_CONFIGS: KeyServerConfig[] = [
   },
 ];
 
-export type SealSigner = {
-  signPersonalMessage(args: { message: Uint8Array }): Promise<{
-    signature: string;
-  }>;
-};
-
 type SealClientOptions = {
   serverConfigs?: KeyServerConfig[];
   timeout?: number;
@@ -41,7 +36,7 @@ type EncryptWithSealArgs = SealClientOptions & {
 
 type CreateSessionKeyArgs = {
   address: string;
-  dAppKit: SealSigner;
+  dAppKit: DAppKit<any, any>;
   mvrName?: string;
   packageId: string;
   suiClient: SealCompatibleClient;
@@ -52,7 +47,7 @@ type DecryptWithSealArgs = SealClientOptions & {
   address?: string;
   checkLEEncoding?: boolean;
   checkShareConsistency?: boolean;
-  dAppKit?: SealSigner;
+  dAppKit?: DAppKit<any, any>;
   encryptedBytes: Uint8Array;
   mvrName?: string;
   packageId?: string;
@@ -99,13 +94,31 @@ export async function encryptWithSeal({
     verifyKeyServers,
   });
 
-  return sealClient.encrypt({
+  console.log("[seal] encrypt:start", {
+    aadBytes: aad?.byteLength ?? 0,
+    dataBytes: data.byteLength,
+    id,
+    packageId,
+    threshold,
+  });
+
+  const encrypted = await sealClient.encrypt({
     aad,
     data,
     id,
     packageId,
     threshold,
   });
+
+  console.log("[seal] encrypt:done", {
+    encryptedBytes: encrypted.encryptedObject.byteLength,
+    keyBytes: encrypted.key.byteLength,
+    keyHexPrefix: Array.from(encrypted.key.slice(0, 8))
+      .map((value) => value.toString(16).padStart(2, "0"))
+      .join(""),
+  });
+
+  return encrypted;
 }
 
 export async function createWalletBackedSessionKey({
@@ -116,19 +129,38 @@ export async function createWalletBackedSessionKey({
   suiClient,
   ttlMin = 10,
 }: CreateSessionKeyArgs) {
+  console.log("[seal] session:create:start", {
+    address,
+    mvrName: mvrName ?? null,
+    packageId,
+    ttlMin,
+  });
+
+  const signer = new CurrentAccountSigner(dAppKit);
+
+  console.log("[seal] session:create:wallet-signer-ready", {
+    address,
+    packageId,
+  });
+
   const sessionKey = await SessionKey.create({
     address,
     mvrName,
     packageId,
+    signer,
     suiClient,
     ttlMin,
   });
 
-  const { signature } = await dAppKit.signPersonalMessage({
-    message: sessionKey.getPersonalMessage(),
+  const certificate = await sessionKey.getCertificate();
+
+  console.log("[seal] session:create:certificate-ready", {
+    address,
+    certificate,
+    packageId,
   });
 
-  await sessionKey.setPersonalMessageSignature(signature);
+  console.log("[seal] session:create:ready", { address, packageId });
 
   return sessionKey;
 }
@@ -182,6 +214,14 @@ export async function decryptWithSeal({
     verifyKeyServers,
   });
 
+  console.log("[seal] decrypt:start", {
+    address: address ?? null,
+    encryptedBytes: encryptedBytes.byteLength,
+    hasSessionKey: Boolean(sessionKey),
+    packageId: packageId ?? null,
+    txBytes: txBytes.byteLength,
+  });
+
   const resolvedSessionKey =
     sessionKey ??
     (await createWalletBackedSessionKey({
@@ -193,13 +233,43 @@ export async function decryptWithSeal({
       ttlMin,
     }));
 
-  return sealClient.decrypt({
-    checkLEEncoding,
-    checkShareConsistency,
-    data: encryptedBytes,
-    sessionKey: resolvedSessionKey,
-    txBytes,
+  const certificate = await resolvedSessionKey.getCertificate();
+
+  console.log("[seal] decrypt:certificate", {
+    address: certificate.user,
+    creationTime: certificate.creation_time,
+    mvrName: certificate.mvr_name ?? null,
+    packageId: resolvedSessionKey.getPackageId(),
+    sessionVk: certificate.session_vk,
+    signature: certificate.signature,
+    ttlMin: certificate.ttl_min,
   });
+
+  try {
+    const decrypted = await sealClient.decrypt({
+      checkLEEncoding,
+      checkShareConsistency,
+      data: encryptedBytes,
+      sessionKey: resolvedSessionKey,
+      txBytes,
+    });
+
+    console.log("[seal] decrypt:done", {
+      decryptedBytes: decrypted.byteLength,
+    });
+
+    return decrypted;
+  } catch (error) {
+    console.log("[seal] decrypt:error", error);
+    console.error("[seal] decrypt:error", {
+      address: address ?? null,
+      encryptedBytes: encryptedBytes.byteLength,
+      packageId: packageId ?? null,
+      txBytes: txBytes.byteLength,
+      error,
+    });
+    throw error;
+  }
 }
 
 export function hexStringToBytes(hex: string): Uint8Array {
