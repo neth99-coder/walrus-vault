@@ -93,6 +93,16 @@ type UploadResponse = {
   };
 };
 
+type WhitelistFeedback = {
+  kind: "error" | "success";
+  message: string;
+};
+
+type FileActionFeedback = {
+  kind: "error";
+  message: string;
+};
+
 type DeletedHistoryArgument =
   | "GasCoin"
   | { Input: number }
@@ -156,7 +166,14 @@ function App() {
   const [uploadFeedback, setUploadFeedback] = useState<UploadFeedback | null>(
     null,
   );
-  const [fileActionError, setFileActionError] = useState<string | null>(null);
+  const [fileActionFeedback, setFileActionFeedback] = useState<
+    Record<string, FileActionFeedback | undefined>
+  >({});
+  const [createWhitelistFeedback, setCreateWhitelistFeedback] =
+    useState<WhitelistFeedback | null>(null);
+  const [whitelistMemberFeedback, setWhitelistMemberFeedback] = useState<
+    Record<string, WhitelistFeedback | undefined>
+  >({});
   const [deletingObjectId, setDeletingObjectId] = useState<string | null>(null);
   const [filesTab, setFilesTab] = useState<"active" | "expired" | "deleted">(
     "active",
@@ -656,16 +673,21 @@ function App() {
     }
 
     if (!sealPolicyPackageId) {
-      setFileActionError(
-        "Set VITE_SEAL_POLICY_PACKAGE_ID after publishing the whitelist package before creating a list.",
-      );
+      setCreateWhitelistFeedback({
+        kind: "error",
+        message:
+          "Set VITE_SEAL_POLICY_PACKAGE_ID after publishing the whitelist package before creating a list.",
+      });
       return;
     }
 
     const trimmedName = newWhitelistName.trim();
 
     if (!trimmedName) {
-      setFileActionError("Enter a name for the whitelist.");
+      setCreateWhitelistFeedback({
+        kind: "error",
+        message: "Enter a name for the whitelist.",
+      });
       return;
     }
 
@@ -675,7 +697,7 @@ function App() {
       trimmedName,
     });
 
-    setFileActionError(null);
+    setCreateWhitelistFeedback(null);
     setIsCreatingWhitelist(true);
 
     try {
@@ -683,11 +705,17 @@ function App() {
       console.log("[whitelist] create:ui-success", created);
       setNewWhitelistName("");
       setUploadWhitelistId(created.whitelistId);
+      setCreateWhitelistFeedback({
+        kind: "success",
+        message: `Created whitelist "${trimmedName}".`,
+      });
     } catch (error) {
       console.error("Create whitelist error:", error);
-      setFileActionError(
-        error instanceof Error ? error.message : "Failed to create whitelist",
-      );
+      setCreateWhitelistFeedback({
+        kind: "error",
+        message:
+          error instanceof Error ? error.message : "Failed to create whitelist",
+      });
     } finally {
       setIsCreatingWhitelist(false);
     }
@@ -926,6 +954,8 @@ function App() {
       console.log("[auth] logout:done", {
         currentNetwork,
       });
+
+      window.location.reload();
     }
   }
 
@@ -935,6 +965,8 @@ function App() {
       currentNetwork,
       transactionData: transaction.getData(),
     });
+
+    await ensureWalletHasGasBalance();
 
     const result = await dAppKit.signAndExecuteTransaction({ transaction });
 
@@ -950,16 +982,44 @@ function App() {
     url: string,
     fileName: string,
     contentType: string | null,
+    objectId?: string,
   ) {
-    const response = await fetch(url);
-    const arrayBuffer = await response.arrayBuffer();
-    const mimeType = resolveDownloadMimeType(
-      arrayBuffer,
-      contentType,
-      response.headers.get("content-type"),
-    );
+    if (objectId) {
+      setFileActionFeedback((current) => ({
+        ...current,
+        [objectId]: undefined,
+      }));
+      setDownloadingObjectId(objectId);
+    }
 
-    triggerFileDownload(arrayBuffer, fileName, mimeType);
+    try {
+      const response = await fetch(url);
+      const arrayBuffer = await response.arrayBuffer();
+      const mimeType = resolveDownloadMimeType(
+        arrayBuffer,
+        contentType,
+        response.headers.get("content-type"),
+      );
+
+      triggerFileDownload(arrayBuffer, fileName, mimeType);
+    } catch (error) {
+      if (objectId) {
+        setFileActionFeedback((current) => ({
+          ...current,
+          [objectId]: {
+            kind: "error",
+            message:
+              error instanceof Error
+                ? error.message
+                : "Failed to download file",
+          },
+        }));
+      }
+    } finally {
+      if (objectId) {
+        setDownloadingObjectId(null);
+      }
+    }
   }
 
   function getStoredLocalMetadata(objectId: string) {
@@ -997,14 +1057,22 @@ function App() {
     const packageId = metadata.packageId ?? sealPolicyPackageId;
 
     if (!packageId || !metadata.keyId) {
-      setFileActionError(
-        "Missing local Seal metadata for this file. The key ID is required for decryption.",
-      );
+      setFileActionFeedback((current) => ({
+        ...current,
+        [file.objectId]: {
+          kind: "error",
+          message:
+            "Missing local Seal metadata for this file. The key ID is required for decryption.",
+        },
+      }));
       return;
     }
 
     setDownloadingObjectId(file.objectId);
-    setFileActionError(null);
+    setFileActionFeedback((current) => ({
+      ...current,
+      [file.objectId]: undefined,
+    }));
 
     try {
       const response = await fetch(file.downloadUrl);
@@ -1078,9 +1146,14 @@ function App() {
         error,
       });
 
-      setFileActionError(
-        error instanceof Error ? error.message : "Failed to decrypt file",
-      );
+      setFileActionFeedback((current) => ({
+        ...current,
+        [file.objectId]: {
+          kind: "error",
+          message:
+            error instanceof Error ? error.message : "Failed to decrypt file",
+        },
+      }));
     } finally {
       setDownloadingObjectId(null);
     }
@@ -1202,21 +1275,65 @@ function App() {
       whitelistMembers: whitelist.members,
     });
 
-    const normalizedAddress = normalizeSuiAddress(accountAddress.trim());
+    const trimmedAddress = accountAddress.trim();
 
-    if (!isValidSuiAddress(normalizedAddress)) {
-      setFileActionError("Enter a valid Sui address.");
+    if (action === "add" && !trimmedAddress) {
+      setWhitelistMemberFeedback((current) => ({
+        ...current,
+        [whitelist.id]: {
+          kind: "error",
+          message: "Enter a Sui address to add.",
+        },
+      }));
+      return;
+    }
+
+    if (!isValidSuiAddress(trimmedAddress)) {
+      setWhitelistMemberFeedback((current) => ({
+        ...current,
+        [whitelist.id]: {
+          kind: "error",
+          message: "Enter a valid Sui address.",
+        },
+      }));
+      return;
+    }
+
+    const normalizedAddress = normalizeSuiAddress(trimmedAddress);
+
+    if (
+      action === "add" &&
+      whitelist.members.some(
+        (member) => normalizeSuiAddress(member) === normalizedAddress,
+      )
+    ) {
+      setWhitelistMemberFeedback((current) => ({
+        ...current,
+        [whitelist.id]: {
+          kind: "error",
+          message: "That address is already in the whitelist.",
+        },
+      }));
       return;
     }
 
     const packageId = whitelist.packageId ?? sealPolicyPackageId;
 
     if (!packageId) {
-      setFileActionError("Missing Seal policy package ID.");
+      setWhitelistMemberFeedback((current) => ({
+        ...current,
+        [whitelist.id]: {
+          kind: "error",
+          message: "Missing Seal policy package ID.",
+        },
+      }));
       return;
     }
 
-    setFileActionError(null);
+    setWhitelistMemberFeedback((current) => ({
+      ...current,
+      [whitelist.id]: undefined,
+    }));
     setUpdatingWhitelistId(whitelist.id);
 
     try {
@@ -1260,6 +1377,17 @@ function App() {
         whitelistId: whitelist.id,
       });
 
+      setWhitelistMemberFeedback((current) => ({
+        ...current,
+        [whitelist.id]: {
+          kind: "success",
+          message:
+            action === "add"
+              ? `Added ${shortenAddress(normalizedAddress)} to ${whitelist.name}.`
+              : `Removed ${shortenAddress(normalizedAddress)} from ${whitelist.name}.`,
+        },
+      }));
+
       if (action === "add") {
         setWhitelistMemberInputs((current) => ({
           ...current,
@@ -1268,12 +1396,54 @@ function App() {
       }
     } catch (error) {
       console.error("Whitelist update error:", error);
-      setFileActionError(
-        error instanceof Error ? error.message : "Failed to update whitelist",
-      );
+      setWhitelistMemberFeedback((current) => ({
+        ...current,
+        [whitelist.id]: {
+          kind: "error",
+          message:
+            error instanceof Error
+              ? error.message
+              : "Failed to update whitelist",
+        },
+      }));
     } finally {
       setUpdatingWhitelistId(null);
     }
+  }
+
+  async function ensureWalletHasGasBalance() {
+    if (!account) {
+      throw new Error("Connect a wallet before sending a transaction.");
+    }
+
+    const { balances } = await client.listBalances({
+      owner: account.address,
+    });
+
+    const suiBalance = balances
+      .filter((balance) => balance.coinType.endsWith("::sui::SUI"))
+      .reduce((total, balance) => total + BigInt(balance.balance), 0n);
+
+    if (suiBalance <= 0n) {
+      throw new Error("This wallet has no SUI available for gas.");
+    }
+  }
+
+  function canAddWhitelistMember(
+    whitelist: LocalWalrusWhitelist,
+    accountAddress: string,
+  ) {
+    const trimmedAddress = accountAddress.trim();
+
+    if (!trimmedAddress || !isValidSuiAddress(trimmedAddress)) {
+      return false;
+    }
+
+    const normalizedAddress = normalizeSuiAddress(trimmedAddress);
+
+    return !whitelist.members.some(
+      (member) => normalizeSuiAddress(member) === normalizedAddress,
+    );
   }
 
   async function handleDelete(file: WalrusBlobRecord) {
@@ -1289,7 +1459,10 @@ function App() {
       return;
     }
 
-    setFileActionError(null);
+    setFileActionFeedback((current) => ({
+      ...current,
+      [file.objectId]: undefined,
+    }));
     setDeletingObjectId(file.objectId);
 
     try {
@@ -1319,9 +1492,14 @@ function App() {
       setHiddenDeletedObjectIds((current) =>
         current.filter((id) => id !== file.objectId),
       );
-      setFileActionError(
-        error instanceof Error ? error.message : "Failed to delete file",
-      );
+      setFileActionFeedback((current) => ({
+        ...current,
+        [file.objectId]: {
+          kind: "error",
+          message:
+            error instanceof Error ? error.message : "Failed to delete file",
+        },
+      }));
     } finally {
       setDeletingObjectId(null);
     }
@@ -1550,13 +1728,23 @@ function App() {
             </div>
             <div className="address-bar-stats">
               <div className="stat-item">
-                <span className="stat-num">{totalFiles}</span>
-                <span className="stat-lbl">files</span>
+                <span className="stat-num">{activeCount}</span>
+                <span className="stat-lbl">Active files</span>
+              </div>
+              <div className="stat-sep" />
+              <div className="stat-item">
+                <span className="stat-num">{expiredCount}</span>
+                <span className="stat-lbl">Expired files</span>
+              </div>
+              <div className="stat-sep" />
+              <div className="stat-item">
+                <span className="stat-num">{deletedCount}</span>
+                <span className="stat-lbl">Deleted files</span>
               </div>
               <div className="stat-sep" />
               <div className="stat-item">
                 <span className="stat-num">{totalAssets}</span>
-                <span className="stat-lbl">assets</span>
+                <span className="stat-lbl">Wallet assets</span>
               </div>
             </div>
           </div>
@@ -1642,6 +1830,17 @@ function App() {
                       <div className="whitelist-section-heading">
                         <h3 className="whitelist-section-title">Create</h3>
                       </div>
+                      {createWhitelistFeedback ? (
+                        <p
+                          className={
+                            createWhitelistFeedback.kind === "error"
+                              ? "feedback-error"
+                              : "feedback-success"
+                          }
+                        >
+                          {createWhitelistFeedback.message}
+                        </p>
+                      ) : null}
                       <div className="file-share-form whitelist-create-form">
                         <input
                           className="text-input"
@@ -1653,7 +1852,11 @@ function App() {
                         />
                         <button
                           className="btn btn-black btn-sm"
-                          disabled={isCreatingWhitelist || !isSealConfigured}
+                          disabled={
+                            isCreatingWhitelist ||
+                            !isSealConfigured ||
+                            !newWhitelistName.trim()
+                          }
                           onClick={() => void handleCreateWhitelist()}
                           type="button"
                         >
@@ -1778,7 +1981,12 @@ function App() {
                                   <button
                                     className="btn btn-outline btn-sm"
                                     disabled={
-                                      updatingWhitelistId === whitelist.id
+                                      updatingWhitelistId === whitelist.id ||
+                                      !canAddWhitelistMember(
+                                        whitelist,
+                                        whitelistMemberInputs[whitelist.id] ??
+                                          "",
+                                      )
                                     }
                                     onClick={() =>
                                       void handleWhitelistMemberUpdate(
@@ -1795,6 +2003,21 @@ function App() {
                                       : "Add member"}
                                   </button>
                                 </div>
+                                {whitelistMemberFeedback[whitelist.id] ? (
+                                  <p
+                                    className={
+                                      whitelistMemberFeedback[whitelist.id]
+                                        ?.kind === "error"
+                                        ? "feedback-error"
+                                        : "feedback-success"
+                                    }
+                                  >
+                                    {
+                                      whitelistMemberFeedback[whitelist.id]
+                                        ?.message
+                                    }
+                                  </p>
+                                ) : null}
                               </div>
                             </article>
                           ))}
@@ -2222,10 +2445,6 @@ function App() {
                     </p>
                   ) : null}
 
-                  {fileActionError ? (
-                    <p className="state-text state-error">{fileActionError}</p>
-                  ) : null}
-
                   {filesTab === "active" &&
                   !walrusFilesQuery.isPending &&
                   !walrusFilesQuery.isError ? (
@@ -2377,6 +2596,7 @@ function App() {
                                             ? file.fileName
                                             : file.objectId,
                                           file.contentType,
+                                          file.objectId,
                                         ))
                                   }
                                   type="button"
@@ -2386,6 +2606,11 @@ function App() {
                                     : "↓"}
                                 </button>
                               </div>
+                              {fileActionFeedback[file.objectId] ? (
+                                <p className="feedback-error">
+                                  {fileActionFeedback[file.objectId]?.message}
+                                </p>
+                              ) : null}
                             </article>
                           );
                         })}
