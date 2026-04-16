@@ -141,6 +141,20 @@ You need:
 - an Enoki app and public API key if you want to use Enoki login
 - a published `walrus_vault_policy` Move package for encrypted uploads, whitelist management, and hash registration
 
+## Git push protection
+
+Git pushes are blocked when the frontend build fails.
+
+- The repository installs a `pre-push` hook through `npm install` via the `prepare` script.
+- The hook runs `npm run build`.
+- If the build exits non-zero, `git push` is aborted.
+
+If hooks are not active in your local clone, run:
+
+```bash
+npm run prepare
+```
+
 ## Environment variables
 
 Create a `.env` file in the project root:
