@@ -1268,6 +1268,91 @@
   flex-wrap: wrap;
 }
 
+.data-room-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 4px;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.data-room-tab {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: #475569;
+  font-size: 0.82rem;
+  font-weight: 700;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+}
+
+.data-room-tab-active {
+  background: #ffffff;
+  color: #0f172a;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.12);
+}
+
+.shared-room-layout {
+  display: grid;
+  gap: 14px;
+}
+
+.shared-bucket-header {
+  margin-bottom: 0;
+}
+
+.shared-room-list {
+  display: grid;
+  gap: 10px;
+}
+
+.shared-room-list h3 {
+  margin: 0;
+  font-size: 0.88rem;
+  color: #334155;
+}
+
+.shared-room-list-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.shared-room-folder {
+  display: grid;
+  gap: 2px;
+  text-align: left;
+  border: 1px solid #e2e8f0;
+  border-radius: 10px;
+  padding: 0.55rem 0.7rem;
+  background: #ffffff;
+  cursor: pointer;
+}
+
+.shared-room-folder:hover {
+  border-color: #bfdbfe;
+  background: #f8fbff;
+}
+
+.shared-room-folder-active {
+  border-color: #60a5fa;
+  background: #eff6ff;
+}
+
+.shared-room-folder-name {
+  color: #0f172a;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.shared-room-folder-meta {
+  color: #64748b;
+  font-size: 0.74rem;
+}
+
 .bucket-breadcrumbs {
   display: flex;
   align-items: center;
@@ -3138,6 +3223,48 @@ select.text-input:disabled {
 /* ── Data room ──────────────────────────────────────────── */
 .bucket-header h2 {
   color: #e2e8f0;
+}
+
+.data-room-tabs {
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.04);
+}
+
+.data-room-tab {
+  color: #94a3b8;
+}
+
+.data-room-tab-active {
+  background: rgba(37, 99, 235, 0.25);
+  color: #dbeafe;
+  box-shadow: none;
+}
+
+.shared-room-list h3 {
+  color: #cbd5e1;
+}
+
+.shared-room-folder {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.03);
+}
+
+.shared-room-folder:hover {
+  border-color: rgba(96, 165, 250, 0.55);
+  background: rgba(96, 165, 250, 0.1);
+}
+
+.shared-room-folder-active {
+  border-color: #60a5fa;
+  background: rgba(96, 165, 250, 0.16);
+}
+
+.shared-room-folder-name {
+  color: #dbeafe;
+}
+
+.shared-room-folder-meta {
+  color: #94a3b8;
 }
 
 .bucket-crumb {

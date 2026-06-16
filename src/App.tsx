@@ -31,15 +31,23 @@ import {
   listLocalFolderAccessPolicies,
   listLocalDeletedWalrusFiles,
   listLocalWalrusFileMetadata,
+  listLocalSharedFolders,
+  listLocalSharedWalrusFiles,
   listLocalWalrusWhitelists,
   markLocalWalrusFileDeleted,
   patchLocalWalrusWhitelist,
+  removeLocalSharedFolder,
+  removeLocalSharedWalrusFiles,
+  removeLocalSharedWalrusFile,
   saveLocalFolderAccessPolicy,
   saveLocalFolder,
+  saveLocalSharedFolder,
+  saveLocalSharedWalrusFile,
   saveLocalWalrusWhitelist,
   saveLocalWalrusFile,
   type DeletedBlobRecord,
   type LocalFolderAccessPolicy,
+  type LocalSharedWalrusFileMetadata,
   type LocalWalrusFileMetadata,
   type LocalWalrusWhitelist,
 } from "./localWalrusMetadata";
@@ -240,6 +248,11 @@ function App() {
   );
   const [workspaceSection, setWorkspaceSection] =
     useState<WorkspaceSection>("rooms");
+  const [dataRoomTab, setDataRoomTab] = useState<"owned" | "shared">("owned");
+  const [selectedSharedFolderId, setSelectedSharedFolderId] = useState<
+    string | null
+  >(null);
+  const [sharedFolderPath, setSharedFolderPath] = useState<string>("/");
   const [whitelistMemberInputs, setWhitelistMemberInputs] = useState<
     Record<string, string>
   >({});
@@ -912,6 +925,8 @@ function App() {
       whitelistName: selectedWhitelist.name,
     });
 
+    shareFolderWithTeamMembers(uploadFolderPath, selectedWhitelist);
+
     setFolderPolicyFeedback({
       kind: "success",
       message: `${formatFolderPath(uploadFolderPath)} now uses ${selectedWhitelist.name}.`,
@@ -1168,6 +1183,26 @@ function App() {
             whitelistName: selectedWhitelist?.name ?? null,
           },
         );
+
+        if (effectiveUploadEncrypt && selectedWhitelist) {
+          shareUploadedFileWithTeamMembers(
+            {
+              blobId: normalizedBlobId,
+              contentType: uploadFile.type || "application/octet-stream",
+              fileName: uploadFile.name || formatBlobLabel(normalizedBlobId),
+              folderPath: uploadFolderPath,
+              keyId,
+              objectId: newObjectId,
+              packageId: effectiveUploadEncrypt
+                ? (sealPolicyPackageId ?? null)
+                : null,
+              uploadedAt,
+              whitelistId: selectedWhitelist.id,
+              whitelistName: selectedWhitelist.name,
+            },
+            selectedWhitelist,
+          );
+        }
 
         console.log("[seal-upload] stored local metadata", {
           blobId: normalizedBlobId,
@@ -1437,6 +1472,142 @@ function App() {
     );
   }
 
+  function shareFolderWithTeamMembers(
+    folderPath: string,
+    team: LocalWalrusWhitelist,
+    sourceFiles: LocalWalrusFileMetadata[] = account
+      ? listLocalWalrusFileMetadata(currentNetwork, account.address)
+      : [],
+  ) {
+    if (!account) {
+      return;
+    }
+
+    const normalizedFolderPath = normalizeFolderPath(folderPath);
+    const matchingFiles = sourceFiles.filter((file) => {
+      const fileFolderPath = normalizeFolderPath(file.folderPath ?? "/");
+
+      return isSameOrChildFolder(fileFolderPath, normalizedFolderPath);
+    });
+
+    for (const member of team.members) {
+      const normalizedMember = normalizeSuiAddress(member);
+
+      if (normalizedMember === normalizeSuiAddress(account.address)) {
+        continue;
+      }
+
+      saveLocalSharedFolder(currentNetwork, normalizedMember, {
+        myWallet: normalizedMember,
+        sharedFolder: normalizedFolderPath,
+        teamId: team.id,
+        teamName: team.name,
+        teamOwner: account.address,
+        updatedAt: new Date().toISOString(),
+      });
+
+      for (const file of matchingFiles) {
+        saveLocalSharedWalrusFile(currentNetwork, normalizedMember, {
+          blobId: file.blobId,
+          contentType: file.contentType,
+          fileName: file.fileName,
+          folderPath: file.folderPath,
+          keyId: file.keyId,
+          myWallet: normalizedMember,
+          objectId: file.objectId,
+          packageId: file.packageId,
+          sharedFolder: normalizedFolderPath,
+          teamId: team.id,
+          teamName: team.name,
+          teamOwner: account.address,
+          uploadedAt: file.uploadedAt,
+          whitelistId: team.id,
+          whitelistName: team.name,
+        });
+      }
+    }
+  }
+
+  function removeFolderAccessFromTeamMembers(
+    folderPath: string,
+    team: LocalWalrusWhitelist,
+  ) {
+    if (!account) {
+      return;
+    }
+
+    const normalizedFolderPath = normalizeFolderPath(folderPath);
+
+    for (const member of team.members) {
+      const normalizedMember = normalizeSuiAddress(member);
+
+      if (normalizedMember === normalizeSuiAddress(account.address)) {
+        continue;
+      }
+
+      removeLocalSharedFolder(currentNetwork, normalizedMember, {
+        sharedFolder: normalizedFolderPath,
+        teamId: team.id,
+        teamOwner: account.address,
+      });
+
+      removeLocalSharedWalrusFiles(currentNetwork, normalizedMember, {
+        sharedFolder: normalizedFolderPath,
+        teamId: team.id,
+        teamOwner: account.address,
+      });
+    }
+  }
+
+  function shareUploadedFileWithTeamMembers(
+    file: Pick<
+      LocalWalrusFileMetadata,
+      | "blobId"
+      | "contentType"
+      | "fileName"
+      | "folderPath"
+      | "keyId"
+      | "objectId"
+      | "packageId"
+      | "uploadedAt"
+      | "whitelistId"
+      | "whitelistName"
+    >,
+    team: LocalWalrusWhitelist,
+  ) {
+    if (!account) {
+      return;
+    }
+
+    const normalizedFolderPath = normalizeFolderPath(file.folderPath ?? "/");
+
+    for (const member of team.members) {
+      const normalizedMember = normalizeSuiAddress(member);
+
+      if (normalizedMember === normalizeSuiAddress(account.address)) {
+        continue;
+      }
+
+      saveLocalSharedWalrusFile(currentNetwork, normalizedMember, {
+        blobId: file.blobId,
+        contentType: file.contentType,
+        fileName: file.fileName,
+        folderPath: file.folderPath,
+        keyId: file.keyId,
+        myWallet: normalizedMember,
+        objectId: file.objectId,
+        packageId: file.packageId,
+        sharedFolder: normalizedFolderPath,
+        teamId: team.id,
+        teamName: team.name,
+        teamOwner: account.address,
+        uploadedAt: file.uploadedAt,
+        whitelistId: team.id,
+        whitelistName: team.name,
+      });
+    }
+  }
+
   async function handleEncryptedDownload(
     file: WalrusBlobRecord,
     metadata: LocalWalrusFileMetadata,
@@ -1540,6 +1711,107 @@ function App() {
       setFileActionFeedback((current) => ({
         ...current,
         [file.objectId]: {
+          kind: "error",
+          message:
+            error instanceof Error ? error.message : "Failed to decrypt file",
+        },
+      }));
+    } finally {
+      setDownloadingObjectId(null);
+    }
+  }
+
+  async function handleSharedFileAccessDownload(
+    sharedFile: LocalSharedWalrusFileMetadata,
+  ) {
+    if (!account) {
+      return;
+    }
+
+    const fileDownloadUrl = getWalrusDownloadUrl(sharedFile.blobId);
+    const fileName = sharedFile.fileName ?? formatBlobLabel(sharedFile.blobId);
+
+    if (!sharedFile.keyId) {
+      setDownloadingObjectId(sharedFile.objectId);
+      setFileActionFeedback((current) => ({
+        ...current,
+        [sharedFile.objectId]: undefined,
+      }));
+
+      try {
+        await handleDownload(
+          fileDownloadUrl,
+          fileName,
+          sharedFile.contentType,
+          sharedFile.objectId,
+        );
+      } finally {
+        setDownloadingObjectId(null);
+      }
+
+      return;
+    }
+
+    const packageId = sharedFile.packageId ?? sealPolicyPackageId;
+
+    if (!packageId) {
+      setFileActionFeedback((current) => ({
+        ...current,
+        [sharedFile.objectId]: {
+          kind: "error",
+          message:
+            "Missing Seal package ID for this shared file. Add VITE_SEAL_POLICY_PACKAGE_ID.",
+        },
+      }));
+      return;
+    }
+
+    const keyIdBytes = hexStringToBytes(sharedFile.keyId);
+
+    setDownloadingObjectId(sharedFile.objectId);
+    setFileActionFeedback((current) => ({
+      ...current,
+      [sharedFile.objectId]: undefined,
+    }));
+
+    try {
+      const response = await fetch(fileDownloadUrl);
+      const encryptedBytes = new Uint8Array(await response.arrayBuffer());
+      const whitelistId =
+        sharedFile.whitelistId ?? deriveWhitelistIdFromKeyId(sharedFile.keyId);
+
+      const approvalTransaction = createSealApprovalTransaction({
+        additionalArguments: (transaction: Transaction) => [
+          transaction.object(whitelistId),
+        ],
+        idBytes: keyIdBytes,
+        moduleName: SEAL_POLICY_MODULE_NAME,
+        packageId,
+      });
+      const txBytes = await buildTransactionKindBytes(
+        historyClient ?? client,
+        approvalTransaction,
+      );
+
+      const decryptedBytes = await decryptWithSeal({
+        address: account.address,
+        dAppKit,
+        encryptedBytes,
+        packageId,
+        suiClient: historyClient ?? client,
+        txBytes,
+      });
+      const plainArrayBuffer = toArrayBuffer(decryptedBytes);
+      const mimeType = resolveDownloadMimeType(
+        plainArrayBuffer,
+        sharedFile.contentType,
+      );
+
+      triggerFileDownload(plainArrayBuffer, fileName, mimeType);
+    } catch (error) {
+      setFileActionFeedback((current) => ({
+        ...current,
+        [sharedFile.objectId]: {
           kind: "error",
           message:
             error instanceof Error ? error.message : "Failed to decrypt file",
@@ -1755,6 +2027,20 @@ function App() {
         members: nextMembers,
       });
 
+      const assignedFolders = folderPolicies.filter(
+        (policy) => policy.whitelistId === whitelist.id,
+      );
+
+      if (action === "add") {
+        for (const policy of assignedFolders) {
+          shareFolderWithTeamMembers(policy.folderPath, whitelist);
+        }
+      } else {
+        for (const policy of assignedFolders) {
+          removeFolderAccessFromTeamMembers(policy.folderPath, whitelist);
+        }
+      }
+
       console.log("[whitelist] member-update:stored-local", {
         action,
         nextMembers,
@@ -1856,6 +2142,8 @@ function App() {
     }));
     setDeletingObjectId(file.objectId);
 
+    const localMetadata = getStoredLocalMetadata(file.objectId);
+
     try {
       const transaction = walrusClient.walrus.deleteBlobTransaction({
         blobObjectId: file.objectId,
@@ -1865,6 +2153,37 @@ function App() {
       await signAndExecuteTransaction(transaction);
 
       markLocalWalrusFileDeleted(currentNetwork, account.address, file);
+      if (localMetadata?.whitelistId) {
+        const deletedFolderPath = normalizeFolderPath(
+          localMetadata.folderPath ?? "/",
+        );
+
+        for (const whitelist of whitelists) {
+          if (whitelist.id !== localMetadata.whitelistId) {
+            continue;
+          }
+
+          for (const member of whitelist.members) {
+            const normalizedMember = normalizeSuiAddress(member);
+
+            if (normalizedMember === normalizeSuiAddress(account.address)) {
+              continue;
+            }
+
+            removeLocalSharedWalrusFile(currentNetwork, normalizedMember, {
+              objectId: file.objectId,
+              teamId: whitelist.id,
+              teamOwner: account.address,
+            });
+
+            removeLocalSharedWalrusFiles(currentNetwork, normalizedMember, {
+              sharedFolder: deletedFolderPath,
+              teamId: whitelist.id,
+              teamOwner: account.address,
+            });
+          }
+        }
+      }
       setHiddenDeletedObjectIds((current) =>
         current.includes(file.objectId) ? current : [...current, file.objectId],
       );
@@ -1977,7 +2296,6 @@ function App() {
     currentEpoch !== null
       ? allFiles.filter((f) => f.storedUntilEpoch <= currentEpoch)
       : [];
-  const totalFiles = allFiles.length;
   const totalAssets = balancesQuery.data?.length ?? 0;
   const activeCount = activeFiles.length;
   const expiredCount = expiredFiles.length;
@@ -2003,11 +2321,192 @@ function App() {
       (policy) => policy.folderPath === normalizeFolderPath(uploadFolderPath),
     ) ?? null;
   const isFolderPolicyLocked = Boolean(currentRoomPolicy);
+  const sharedFolderRecords = account
+    ? listLocalSharedFolders(currentNetwork, account.address)
+    : [];
+  const sharedFileAccessRecords = account
+    ? listLocalSharedWalrusFiles(currentNetwork, account.address)
+    : [];
+  const sharedFolderItems = useMemo(() => {
+    const recordsByFolder = new Map<
+      string,
+      {
+        folderPath: string;
+        id: string;
+        ownerAddress: string;
+        teamId: string;
+        teamName: string;
+      }
+    >();
+
+    for (const record of sharedFolderRecords) {
+      const ownerAddress = normalizeSuiAddress(record.teamOwner);
+      const folderPath = normalizeFolderPath(record.sharedFolder);
+      const id = `${ownerAddress}:${folderPath}`;
+
+      if (!recordsByFolder.has(id)) {
+        recordsByFolder.set(id, {
+          folderPath,
+          id,
+          ownerAddress,
+          teamId: record.teamId,
+          teamName: record.teamName,
+        });
+      }
+    }
+
+    return Array.from(recordsByFolder.values());
+  }, [sharedFolderRecords]);
+  const selectedSharedFolder =
+    sharedFolderItems.find((item) => item.id === selectedSharedFolderId) ??
+    null;
+  const selectedSharedRootPath = selectedSharedFolder
+    ? normalizeFolderPath(selectedSharedFolder.folderPath)
+    : "/";
+  const sharedCurrentPath = selectedSharedFolder
+    ? normalizeFolderPath(sharedFolderPath)
+    : "/";
+  const sharedAccessRecords = selectedSharedFolder
+    ? sharedFileAccessRecords.length > 0
+      ? sharedFileAccessRecords
+      : listLocalWalrusFileMetadata(
+          currentNetwork,
+          selectedSharedFolder.ownerAddress,
+        ).map((file) => ({
+          blobId: file.blobId,
+          contentType: file.contentType,
+          fileName: file.fileName,
+          folderPath: file.folderPath,
+          keyId: file.keyId,
+          myWallet: account?.address ?? "",
+          objectId: file.objectId,
+          packageId: file.packageId,
+          sharedFolder: selectedSharedRootPath,
+          teamId: selectedSharedFolder.teamId,
+          teamName: selectedSharedFolder.teamName,
+          teamOwner: selectedSharedFolder.ownerAddress,
+          uploadedAt: file.uploadedAt,
+          whitelistId: file.whitelistId,
+          whitelistName: file.whitelistName,
+        }))
+    : [];
+  const sharedFolderAccessRecords = selectedSharedFolder
+    ? sharedAccessRecords.filter((record) => {
+        return (
+          record.teamId === selectedSharedFolder.teamId &&
+          normalizeSuiAddress(record.teamOwner) ===
+            normalizeSuiAddress(selectedSharedFolder.ownerAddress) &&
+          isSameOrChildFolder(
+            normalizeFolderPath(record.sharedFolder),
+            selectedSharedRootPath,
+          )
+        );
+      })
+    : [];
+  const sharedOwnerFolderPaths = selectedSharedFolder
+    ? Array.from(
+        new Set(
+          sharedFolderAccessRecords.map((record) =>
+            normalizeFolderPath(record.folderPath ?? record.sharedFolder),
+          ),
+        ),
+      )
+    : [];
+  const sharedCurrentFolders = selectedSharedFolder
+    ? getChildFolders(sharedCurrentPath, sharedOwnerFolderPaths)
+    : [];
+  const sharedRoomFiles = selectedSharedFolder
+    ? sharedFolderAccessRecords
+        .filter((file) => {
+          const folderPath = normalizeFolderPath(file.folderPath ?? "/");
+
+          return (
+            folderPath === sharedCurrentPath &&
+            isSameOrChildFolder(folderPath, selectedSharedRootPath)
+          );
+        })
+        .sort((left, right) =>
+          (left.fileName ?? left.objectId).localeCompare(
+            right.fileName ?? right.objectId,
+          ),
+        )
+    : [];
+  const sharedBreadcrumbs = useMemo(() => {
+    if (!selectedSharedFolder) {
+      return [] as Array<{ label: string; path: string }>;
+    }
+
+    const rootPath = selectedSharedRootPath;
+    const currentPath = sharedCurrentPath;
+    const rootLabel = `${shortenAddress(selectedSharedFolder.ownerAddress)}/${getFolderName(rootPath)}`;
+    const crumbs: Array<{ label: string; path: string }> = [
+      { label: rootLabel, path: rootPath },
+    ];
+
+    if (currentPath === rootPath) {
+      return crumbs;
+    }
+
+    const relativePath = currentPath
+      .slice(rootPath.length)
+      .replace(/^\/+/, "")
+      .trim();
+
+    if (!relativePath) {
+      return crumbs;
+    }
+
+    const segments = relativePath.split("/").filter(Boolean);
+
+    segments.forEach((segment, index) => {
+      const path = normalizeFolderPath(
+        `${rootPath}/${segments.slice(0, index + 1).join("/")}`,
+      );
+      crumbs.push({
+        label: segment.replaceAll("-", " "),
+        path,
+      });
+    });
+
+    return crumbs;
+  }, [selectedSharedFolder, selectedSharedRootPath, sharedCurrentPath]);
 
   useEffect(() => {
     setFolderPolicyWhitelistId(currentRoomPolicy?.whitelistId ?? "");
     setFolderPolicyFeedback(null);
   }, [currentRoomPolicy?.whitelistId, uploadFolderPath]);
+
+  useEffect(() => {
+    if (dataRoomTab !== "shared") {
+      return;
+    }
+
+    if (sharedFolderItems.length === 0) {
+      setSelectedSharedFolderId(null);
+      return;
+    }
+
+    if (
+      selectedSharedFolderId &&
+      !sharedFolderItems.some((item) => item.id === selectedSharedFolderId)
+    ) {
+      setSelectedSharedFolderId(null);
+    }
+  }, [dataRoomTab, selectedSharedFolderId, sharedFolderItems]);
+
+  useEffect(() => {
+    if (!selectedSharedFolder) {
+      setSharedFolderPath("/");
+      return;
+    }
+
+    const nextRootPath = normalizeFolderPath(selectedSharedFolder.folderPath);
+    const currentPath = normalizeFolderPath(sharedFolderPath);
+
+    if (!isSameOrChildFolder(currentPath, nextRootPath)) {
+      setSharedFolderPath(nextRootPath);
+    }
+  }, [selectedSharedFolder, sharedFolderPath]);
 
   async function copyTextToClipboard(text: string) {
     if (navigator.clipboard?.writeText) {
@@ -2598,7 +3097,7 @@ function App() {
                     {whitelists.length}
                   </span>
                 </button>
-                <button
+                {/* <button
                   className={`workspace-nav-item ${workspaceSection === "shared" ? "workspace-nav-item-active" : ""}`}
                   onClick={() => setWorkspaceSection("shared")}
                   type="button"
@@ -2607,7 +3106,7 @@ function App() {
                     Shared Access
                   </span>
                   <span className="workspace-nav-item-meta">Open</span>
-                </button>
+                </button> */}
                 <button
                   className={`workspace-nav-item ${workspaceSection === "assets" ? "workspace-nav-item-active" : ""}`}
                   onClick={() => setWorkspaceSection("assets")}
@@ -2887,614 +3386,902 @@ function App() {
 
               {workspaceSection === "rooms" ? (
                 <section className="card workspace-panel">
-                  <div className="bucket-header">
-                    <div>
-                      <div className="bucket-breadcrumbs">
-                        {getFolderBreadcrumbs(uploadFolderPath).map((crumb) => (
-                          <button
-                            className="bucket-crumb"
-                            key={crumb.path}
-                            onClick={() => {
-                              const directPolicy = folderPolicies.find(
-                                (policy) => policy.folderPath === crumb.path,
-                              );
-                              setUploadFolderPath(crumb.path);
-                              setFolderPolicyWhitelistId(
-                                directPolicy?.whitelistId ?? "",
-                              );
-                              setFolderPolicyFeedback(null);
-                            }}
-                            type="button"
-                          >
-                            {crumb.label}
-                          </button>
-                        ))}
-                      </div>
-                      <h2>
-                        {getFolderName(uploadFolderPath)}
-                        <span className="count-badge">
-                          {currentRoomFolders.length + currentRoomFiles.length}
-                        </span>
-                      </h2>
-                    </div>
-                    <div className="bucket-header-actions">
-                      {currentRoomPolicy ? (
-                        <span className="folder-policy-chip">
-                          {currentRoomPolicy.whitelistName}
-                        </span>
-                      ) : null}
-                      <button
-                        className="btn btn-outline btn-sm"
-                        onClick={() => void walrusFilesQuery.refetch()}
-                        type="button"
-                      >
-                        ↻ Refresh
-                      </button>
-                    </div>
-                  </div>
-
-                  <div className="bucket-policy-bar">
-                    <div className="file-share-form bucket-policy-form">
-                      <select
-                        className="text-input"
-                        disabled={isFolderPolicyLocked}
-                        value={folderPolicyWhitelistId}
-                        onChange={(event) =>
-                          setFolderPolicyWhitelistId(event.target.value)
-                        }
-                      >
-                        <option value="">Choose team</option>
-                        {whitelists
-                          .filter((whitelist) => !whitelist.isMyselfGroup)
-                          .map((whitelist) => (
-                            <option key={whitelist.id} value={whitelist.id}>
-                              {whitelist.name}
-                            </option>
-                          ))}
-                      </select>
-                      <button
-                        className="btn btn-outline btn-sm"
-                        disabled={
-                          !folderPolicyWhitelistId || isFolderPolicyLocked
-                        }
-                        onClick={() => void handleSaveFolderPolicy()}
-                        type="button"
-                      >
-                        {isFolderPolicyLocked ? "Assigned" : "Assign team"}
-                      </button>
-                    </div>
-                    {currentRoomDirectPolicy ? (
-                      <p className="hint-text">
-                        Team assignment is locked for this folder until policy
-                        updates are supported on-chain.
-                      </p>
-                    ) : null}
-                    {currentRoomPolicy && !currentRoomDirectPolicy ? (
-                      <p className="hint-text">
-                        Inherits {currentRoomPolicy.whitelistName} from{" "}
-                        {formatFolderPath(currentRoomPolicy.folderPath)}. Nested
-                        folder team overrides are not supported on-chain yet.
-                      </p>
-                    ) : null}
-                    {folderPolicyFeedback ? (
-                      <p
-                        className={
-                          folderPolicyFeedback.kind === "error"
-                            ? "feedback-error"
-                            : "feedback-success"
-                        }
-                      >
-                        {folderPolicyFeedback.message}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  <div className="bucket-create-bar">
-                    <div className="file-share-form">
-                      <input
-                        className="text-input"
-                        placeholder="New folder"
-                        value={newFolderName}
-                        onChange={(event) => {
-                          setNewFolderName(event.target.value);
-                          setCreateFolderFeedback(null);
-                        }}
-                        onKeyDown={(event) => {
-                          if (event.key === "Enter") {
-                            void handleCreateFolder();
-                          }
-                        }}
-                      />
-                      <button
-                        className="btn btn-outline btn-sm"
-                        disabled={!newFolderName.trim()}
-                        onClick={() => void handleCreateFolder()}
-                        type="button"
-                      >
-                        Add folder
-                      </button>
-                    </div>
-                    {createFolderFeedback ? (
-                      <p
-                        className={
-                          createFolderFeedback.kind === "error"
-                            ? "feedback-error"
-                            : "feedback-success"
-                        }
-                      >
-                        {createFolderFeedback.message}
-                      </p>
-                    ) : null}
-                  </div>
-
-                  {isRoomUploadOpen ? (
-                    <div
-                      className="modal-backdrop"
-                      onMouseDown={(event) => {
-                        if (event.target === event.currentTarget) {
-                          setIsRoomUploadOpen(false);
-                          setIsDragOver(false);
-                        }
-                      }}
-                      role="presentation"
-                    >
-                      <div
-                        aria-labelledby="room-upload-title"
-                        aria-modal="true"
-                        className="upload-modal"
-                        role="dialog"
-                      >
-                        <div className="upload-modal-header">
-                          <div>
-                            <p className="upload-modal-eyebrow">
-                              {formatFolderPath(uploadFolderPath)}
-                            </p>
-                            <h3 id="room-upload-title">Upload file</h3>
-                          </div>
-                          <button
-                            className="modal-close-btn"
-                            onClick={() => {
-                              setIsRoomUploadOpen(false);
-                              setIsDragOver(false);
-                            }}
-                            type="button"
-                          >
-                            Close
-                          </button>
-                        </div>
-
-                        <div className="bucket-upload-panel">
-                          <div className="upload-form">
-                            {/* ── Drop zone ── */}
-                            <div
-                              className={`bucket-dropzone${isDragOver ? " bucket-dropzone-drag" : ""}${uploadFile ? " bucket-dropzone-filled" : ""}`}
-                              onDragOver={handleRoomDragOver}
-                              onDragLeave={handleRoomDragLeave}
-                              onDrop={handleRoomDrop}
-                            >
-                              <input
-                                id="walrus-file-input"
-                                className="file-input-native"
-                                type="file"
-                                onChange={handleFileSelection}
-                              />
-                              {uploadFile ? (
-                                <label
-                                  className="bucket-dropzone-content"
-                                  htmlFor="walrus-file-input"
-                                >
-                                  <span
-                                    className="bucket-dropzone-file-emoji"
-                                    aria-hidden="true"
-                                  >
-                                    {getFileTypeIcon(
-                                      uploadFile.type,
-                                      uploadFile.name,
-                                    )}
-                                  </span>
-                                  <div className="bucket-dropzone-file-info">
-                                    <span className="bucket-dropzone-filename">
-                                      {uploadFile.name}
-                                    </span>
-                                    <span className="bucket-dropzone-filesize">
-                                      {formatBytes(String(uploadFile.size))}
-                                    </span>
-                                  </div>
-                                  <span className="bucket-dropzone-change">
-                                    Click or drop to replace
-                                  </span>
-                                </label>
-                              ) : (
-                                <label
-                                  className="bucket-dropzone-content"
-                                  htmlFor="walrus-file-input"
-                                >
-                                  <span
-                                    className="bucket-dropzone-upload-icon"
-                                    aria-hidden="true"
-                                  >
-                                    ⬆
-                                  </span>
-                                  <span className="bucket-dropzone-text">
-                                    Drop a file here or{" "}
-                                    <span className="bucket-dropzone-link">
-                                      click to browse
-                                    </span>
-                                  </span>
-                                </label>
-                              )}
-                            </div>
-
-                            {inheritedUploadPolicy ? (
-                              <p className="feedback-info">
-                                Uploads here inherit access from{" "}
-                                <span className="mono">
-                                  {formatFolderPath(
-                                    inheritedUploadPolicy.folderPath,
-                                  )}
-                                </span>
-                                : {inheritedUploadPolicy.whitelistName}
-                              </p>
-                            ) : null}
-
-                            <div className="form-row">
-                              <label
-                                className="toggle-field"
-                                htmlFor="walrus-encrypt-toggle"
-                              >
-                                <input
-                                  id="walrus-encrypt-toggle"
-                                  type="checkbox"
-                                  checked={effectiveUploadEncrypt}
-                                  disabled={isUploadEncryptionRequired}
-                                  onChange={(event) => {
-                                    const nextChecked = event.target.checked;
-                                    setUploadEncrypt(nextChecked);
-                                    if (!nextChecked) {
-                                      setUploadWhitelistId("");
-                                    }
-                                  }}
-                                />
-                                <span>
-                                  {isUploadEncryptionRequired
-                                    ? "Seal required"
-                                    : "Encrypt with Seal"}
-                                </span>
-                              </label>
-                              <div className="form-field">
-                                <label
-                                  className="field-label"
-                                  htmlFor="walrus-epochs-input"
-                                >
-                                  Epochs
-                                  <span
-                                    className="info-tip"
-                                    aria-label={`One epoch is ~24 hours on Walrus. Your file stays stored for this many epochs from now.${
-                                      currentEpoch !== null
-                                        ? ` Current epoch: ${currentEpoch}.`
-                                        : ""
-                                    } E.g. entering 5 stores it for ~5 days.`}
-                                  >
-                                    ⓘ
-                                  </span>
-                                </label>
-                                <input
-                                  id="walrus-epochs-input"
-                                  className="text-input"
-                                  inputMode="numeric"
-                                  min="1"
-                                  step="1"
-                                  value={uploadEpochs}
-                                  onChange={(event) =>
-                                    setUploadEpochs(event.target.value)
-                                  }
-                                />
-                              </div>
-                              <label
-                                className="toggle-field"
-                                htmlFor="walrus-deletable-toggle"
-                              >
-                                <input
-                                  id="walrus-deletable-toggle"
-                                  type="checkbox"
-                                  checked={isUploadDeletable}
-                                  onChange={(event) =>
-                                    setIsUploadDeletable(event.target.checked)
-                                  }
-                                />
-                                <span>Deletable</span>
-                              </label>
-                            </div>
-
-                            {effectiveUploadEncrypt ? (
-                              <div className="form-field">
-                                <label
-                                  className="field-label"
-                                  htmlFor="walrus-whitelist-select"
-                                >
-                                  Access Group
-                                </label>
-                                <select
-                                  id="walrus-whitelist-select"
-                                  className="text-input"
-                                  value={uploadWhitelistId}
-                                  disabled={isUploadEncryptionRequired}
-                                  onChange={(event) =>
-                                    setUploadWhitelistId(event.target.value)
-                                  }
-                                >
-                                  {inheritedUploadPolicy ? (
-                                    <option value="">
-                                      {inheritedUploadPolicy.whitelistName}{" "}
-                                      (inherited)
-                                    </option>
-                                  ) : (
-                                    <option value="">Only me (default)</option>
-                                  )}
-                                  {whitelists
-                                    .filter(
-                                      (whitelist) => !whitelist.isMyselfGroup,
-                                    )
-                                    .map((whitelist) => (
-                                      <option
-                                        key={whitelist.id}
-                                        value={whitelist.id}
-                                      >
-                                        {whitelist.name}
-                                      </option>
-                                    ))}
-                                </select>
-                              </div>
-                            ) : null}
-
-                            <button
-                              className="btn btn-black"
-                              disabled={
-                                !uploadFile ||
-                                isUploading ||
-                                (effectiveUploadEncrypt && !isSealConfigured)
-                              }
-                              onClick={() => void handleWalrusUpload()}
-                              type="button"
-                            >
-                              {isUploading
-                                ? "Uploading\u2026"
-                                : effectiveUploadEncrypt
-                                  ? "Encrypt & upload"
-                                  : "Upload to Walrus"}
-                            </button>
-
-                            {effectiveUploadEncrypt && !isSealConfigured ? (
-                              <p className="feedback-error">
-                                Add <code>VITE_SEAL_POLICY_PACKAGE_ID</code>{" "}
-                                after publishing the whitelist package to enable
-                                encrypted uploads.
-                              </p>
-                            ) : null}
-
-                            {uploadError ? (
-                              <p className="feedback-error">{uploadError}</p>
-                            ) : null}
-
-                            {uploadFeedback?.kind === "newly-created" ? (
-                              <p className="feedback-success">
-                                Uploaded. Object{" "}
-                                <span className="mono">
-                                  {shortenObjectId(uploadFeedback.objectId)}
-                                </span>{" "}
-                                stored until epoch{" "}
-                                {uploadFeedback.storedUntilEpoch}.
-                              </p>
-                            ) : null}
-
-                            {uploadFeedback?.kind === "already-certified" ? (
-                              <p className="feedback-info">
-                                Already stored. Blob{" "}
-                                <span className="mono">
-                                  {shortenBlobId(uploadFeedback.blobId)}
-                                </span>{" "}
-                                until epoch {uploadFeedback.storedUntilEpoch}.
-                              </p>
-                            ) : null}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ) : null}
-
-                  <div className="bucket-table">
-                    <div className="bucket-table-head">
-                      <span>Name</span>
-                      <span>Type</span>
-                      <span>Access</span>
-                      <span>Actions</span>
-                    </div>
+                  <div
+                    className="data-room-tabs"
+                    role="tablist"
+                    aria-label="Data Room views"
+                  >
                     <button
-                      className="bucket-row bucket-upload-row"
-                      onClick={() => {
-                        setUploadError(null);
-                        setUploadFeedback(null);
-                        setIsRoomUploadOpen((isOpen) => !isOpen);
-                      }}
+                      aria-selected={dataRoomTab === "owned"}
+                      className={`data-room-tab${dataRoomTab === "owned" ? " data-room-tab-active" : ""}`}
+                      onClick={() => setDataRoomTab("owned")}
+                      role="tab"
                       type="button"
                     >
-                      <span className="bucket-upload-row-label">
-                        <span
-                          className="bucket-upload-row-icon"
-                          aria-hidden="true"
-                        >
-                          {isRoomUploadOpen ? "×" : "+"}
-                        </span>
-                        {isRoomUploadOpen ? "Close upload" : "Upload file"}
-                      </span>
-                      <span />
-                      <span />
-                      <span />
+                      Owned
                     </button>
-                    {uploadFolderPath !== "/" ? (
-                      <button
-                        className="bucket-row bucket-folder-row"
-                        onClick={() => {
-                          const parentPath =
-                            getParentFolderPath(uploadFolderPath);
-                          const directPolicy = folderPolicies.find(
-                            (policy) => policy.folderPath === parentPath,
-                          );
-                          setUploadFolderPath(parentPath);
-                          setFolderPolicyWhitelistId(
-                            directPolicy?.whitelistId ?? "",
-                          );
-                        }}
-                        type="button"
-                      >
-                        <span className="bucket-name">
-                          <span className="bucket-item-icon" aria-hidden="true">
-                            📂
-                          </span>
-                          ../
-                        </span>
-                        <span className="meta-chip meta-chip-folder">
-                          folder
-                        </span>
-                        <span className="hint-text">parent</span>
-                        <span />
-                      </button>
-                    ) : null}
-                    {currentRoomFolders.map((folderPath) => {
-                      const inheritedPolicy = resolveFolderAccessPolicy(
-                        folderPath,
-                        folderPolicies,
-                      );
+                    <button
+                      aria-selected={dataRoomTab === "shared"}
+                      className={`data-room-tab${dataRoomTab === "shared" ? " data-room-tab-active" : ""}`}
+                      onClick={() => setDataRoomTab("shared")}
+                      role="tab"
+                      type="button"
+                    >
+                      Shared
+                    </button>
+                  </div>
 
-                      return (
+                  {dataRoomTab === "owned" ? (
+                    <>
+                      <div className="bucket-header">
+                        <div>
+                          <div className="bucket-breadcrumbs">
+                            {getFolderBreadcrumbs(uploadFolderPath).map(
+                              (crumb) => (
+                                <button
+                                  className="bucket-crumb"
+                                  key={crumb.path}
+                                  onClick={() => {
+                                    const directPolicy = folderPolicies.find(
+                                      (policy) =>
+                                        policy.folderPath === crumb.path,
+                                    );
+                                    setUploadFolderPath(crumb.path);
+                                    setFolderPolicyWhitelistId(
+                                      directPolicy?.whitelistId ?? "",
+                                    );
+                                    setFolderPolicyFeedback(null);
+                                  }}
+                                  type="button"
+                                >
+                                  {crumb.label}
+                                </button>
+                              ),
+                            )}
+                          </div>
+                          <h2>
+                            {getFolderName(uploadFolderPath)}
+                            <span className="count-badge">
+                              {currentRoomFolders.length +
+                                currentRoomFiles.length}
+                            </span>
+                          </h2>
+                        </div>
+                        <div className="bucket-header-actions">
+                          {currentRoomPolicy ? (
+                            <span className="folder-policy-chip">
+                              {currentRoomPolicy.whitelistName}
+                            </span>
+                          ) : null}
+                          <button
+                            className="btn btn-outline btn-sm"
+                            onClick={() => void walrusFilesQuery.refetch()}
+                            type="button"
+                          >
+                            ↻ Refresh
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="bucket-policy-bar">
+                        <div className="file-share-form bucket-policy-form">
+                          <select
+                            className="text-input"
+                            disabled={isFolderPolicyLocked}
+                            value={folderPolicyWhitelistId}
+                            onChange={(event) =>
+                              setFolderPolicyWhitelistId(event.target.value)
+                            }
+                          >
+                            <option value="">Choose team</option>
+                            {whitelists
+                              .filter((whitelist) => !whitelist.isMyselfGroup)
+                              .map((whitelist) => (
+                                <option key={whitelist.id} value={whitelist.id}>
+                                  {whitelist.name}
+                                </option>
+                              ))}
+                          </select>
+                          <button
+                            className="btn btn-outline btn-sm"
+                            disabled={
+                              !folderPolicyWhitelistId || isFolderPolicyLocked
+                            }
+                            onClick={() => void handleSaveFolderPolicy()}
+                            type="button"
+                          >
+                            {isFolderPolicyLocked ? "Assigned" : "Assign team"}
+                          </button>
+                        </div>
+                        {currentRoomDirectPolicy ? (
+                          <p className="hint-text">
+                            Team assignment is locked for this folder until
+                            policy updates are supported on-chain.
+                          </p>
+                        ) : null}
+                        {currentRoomPolicy && !currentRoomDirectPolicy ? (
+                          <p className="hint-text">
+                            Inherits {currentRoomPolicy.whitelistName} from{" "}
+                            {formatFolderPath(currentRoomPolicy.folderPath)}.
+                            Nested folder team overrides are not supported
+                            on-chain yet.
+                          </p>
+                        ) : null}
+                        {folderPolicyFeedback ? (
+                          <p
+                            className={
+                              folderPolicyFeedback.kind === "error"
+                                ? "feedback-error"
+                                : "feedback-success"
+                            }
+                          >
+                            {folderPolicyFeedback.message}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      <div className="bucket-create-bar">
+                        <div className="file-share-form">
+                          <input
+                            className="text-input"
+                            placeholder="New folder"
+                            value={newFolderName}
+                            onChange={(event) => {
+                              setNewFolderName(event.target.value);
+                              setCreateFolderFeedback(null);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                void handleCreateFolder();
+                              }
+                            }}
+                          />
+                          <button
+                            className="btn btn-outline btn-sm"
+                            disabled={!newFolderName.trim()}
+                            onClick={() => void handleCreateFolder()}
+                            type="button"
+                          >
+                            Add folder
+                          </button>
+                        </div>
+                        {createFolderFeedback ? (
+                          <p
+                            className={
+                              createFolderFeedback.kind === "error"
+                                ? "feedback-error"
+                                : "feedback-success"
+                            }
+                          >
+                            {createFolderFeedback.message}
+                          </p>
+                        ) : null}
+                      </div>
+
+                      {isRoomUploadOpen ? (
+                        <div
+                          className="modal-backdrop"
+                          onMouseDown={(event) => {
+                            if (event.target === event.currentTarget) {
+                              setIsRoomUploadOpen(false);
+                              setIsDragOver(false);
+                            }
+                          }}
+                          role="presentation"
+                        >
+                          <div
+                            aria-labelledby="room-upload-title"
+                            aria-modal="true"
+                            className="upload-modal"
+                            role="dialog"
+                          >
+                            <div className="upload-modal-header">
+                              <div>
+                                <p className="upload-modal-eyebrow">
+                                  {formatFolderPath(uploadFolderPath)}
+                                </p>
+                                <h3 id="room-upload-title">Upload file</h3>
+                              </div>
+                              <button
+                                className="modal-close-btn"
+                                onClick={() => {
+                                  setIsRoomUploadOpen(false);
+                                  setIsDragOver(false);
+                                }}
+                                type="button"
+                              >
+                                Close
+                              </button>
+                            </div>
+
+                            <div className="bucket-upload-panel">
+                              <div className="upload-form">
+                                {/* ── Drop zone ── */}
+                                <div
+                                  className={`bucket-dropzone${isDragOver ? " bucket-dropzone-drag" : ""}${uploadFile ? " bucket-dropzone-filled" : ""}`}
+                                  onDragOver={handleRoomDragOver}
+                                  onDragLeave={handleRoomDragLeave}
+                                  onDrop={handleRoomDrop}
+                                >
+                                  <input
+                                    id="walrus-file-input"
+                                    className="file-input-native"
+                                    type="file"
+                                    onChange={handleFileSelection}
+                                  />
+                                  {uploadFile ? (
+                                    <label
+                                      className="bucket-dropzone-content"
+                                      htmlFor="walrus-file-input"
+                                    >
+                                      <span
+                                        className="bucket-dropzone-file-emoji"
+                                        aria-hidden="true"
+                                      >
+                                        {getFileTypeIcon(
+                                          uploadFile.type,
+                                          uploadFile.name,
+                                        )}
+                                      </span>
+                                      <div className="bucket-dropzone-file-info">
+                                        <span className="bucket-dropzone-filename">
+                                          {uploadFile.name}
+                                        </span>
+                                        <span className="bucket-dropzone-filesize">
+                                          {formatBytes(String(uploadFile.size))}
+                                        </span>
+                                      </div>
+                                      <span className="bucket-dropzone-change">
+                                        Click or drop to replace
+                                      </span>
+                                    </label>
+                                  ) : (
+                                    <label
+                                      className="bucket-dropzone-content"
+                                      htmlFor="walrus-file-input"
+                                    >
+                                      <span
+                                        className="bucket-dropzone-upload-icon"
+                                        aria-hidden="true"
+                                      >
+                                        ⬆
+                                      </span>
+                                      <span className="bucket-dropzone-text">
+                                        Drop a file here or{" "}
+                                        <span className="bucket-dropzone-link">
+                                          click to browse
+                                        </span>
+                                      </span>
+                                    </label>
+                                  )}
+                                </div>
+
+                                {inheritedUploadPolicy ? (
+                                  <p className="feedback-info">
+                                    Uploads here inherit access from{" "}
+                                    <span className="mono">
+                                      {formatFolderPath(
+                                        inheritedUploadPolicy.folderPath,
+                                      )}
+                                    </span>
+                                    : {inheritedUploadPolicy.whitelistName}
+                                  </p>
+                                ) : null}
+
+                                <div className="form-row">
+                                  <label
+                                    className="toggle-field"
+                                    htmlFor="walrus-encrypt-toggle"
+                                  >
+                                    <input
+                                      id="walrus-encrypt-toggle"
+                                      type="checkbox"
+                                      checked={effectiveUploadEncrypt}
+                                      disabled={isUploadEncryptionRequired}
+                                      onChange={(event) => {
+                                        const nextChecked =
+                                          event.target.checked;
+                                        setUploadEncrypt(nextChecked);
+                                        if (!nextChecked) {
+                                          setUploadWhitelistId("");
+                                        }
+                                      }}
+                                    />
+                                    <span>
+                                      {isUploadEncryptionRequired
+                                        ? "Seal required"
+                                        : "Encrypt with Seal"}
+                                    </span>
+                                  </label>
+                                  <div className="form-field">
+                                    <label
+                                      className="field-label"
+                                      htmlFor="walrus-epochs-input"
+                                    >
+                                      Epochs
+                                      <span
+                                        className="info-tip"
+                                        aria-label={`One epoch is ~24 hours on Walrus. Your file stays stored for this many epochs from now.${
+                                          currentEpoch !== null
+                                            ? ` Current epoch: ${currentEpoch}.`
+                                            : ""
+                                        } E.g. entering 5 stores it for ~5 days.`}
+                                      >
+                                        ⓘ
+                                      </span>
+                                    </label>
+                                    <input
+                                      id="walrus-epochs-input"
+                                      className="text-input"
+                                      inputMode="numeric"
+                                      min="1"
+                                      step="1"
+                                      value={uploadEpochs}
+                                      onChange={(event) =>
+                                        setUploadEpochs(event.target.value)
+                                      }
+                                    />
+                                  </div>
+                                  <label
+                                    className="toggle-field"
+                                    htmlFor="walrus-deletable-toggle"
+                                  >
+                                    <input
+                                      id="walrus-deletable-toggle"
+                                      type="checkbox"
+                                      checked={isUploadDeletable}
+                                      onChange={(event) =>
+                                        setIsUploadDeletable(
+                                          event.target.checked,
+                                        )
+                                      }
+                                    />
+                                    <span>Deletable</span>
+                                  </label>
+                                </div>
+
+                                {effectiveUploadEncrypt ? (
+                                  <div className="form-field">
+                                    <label
+                                      className="field-label"
+                                      htmlFor="walrus-whitelist-select"
+                                    >
+                                      Access Group
+                                    </label>
+                                    <select
+                                      id="walrus-whitelist-select"
+                                      className="text-input"
+                                      value={uploadWhitelistId}
+                                      disabled={isUploadEncryptionRequired}
+                                      onChange={(event) =>
+                                        setUploadWhitelistId(event.target.value)
+                                      }
+                                    >
+                                      {inheritedUploadPolicy ? (
+                                        <option value="">
+                                          {inheritedUploadPolicy.whitelistName}{" "}
+                                          (inherited)
+                                        </option>
+                                      ) : (
+                                        <option value="">
+                                          Only me (default)
+                                        </option>
+                                      )}
+                                      {whitelists
+                                        .filter(
+                                          (whitelist) =>
+                                            !whitelist.isMyselfGroup,
+                                        )
+                                        .map((whitelist) => (
+                                          <option
+                                            key={whitelist.id}
+                                            value={whitelist.id}
+                                          >
+                                            {whitelist.name}
+                                          </option>
+                                        ))}
+                                    </select>
+                                  </div>
+                                ) : null}
+
+                                <button
+                                  className="btn btn-black"
+                                  disabled={
+                                    !uploadFile ||
+                                    isUploading ||
+                                    (effectiveUploadEncrypt &&
+                                      !isSealConfigured)
+                                  }
+                                  onClick={() => void handleWalrusUpload()}
+                                  type="button"
+                                >
+                                  {isUploading
+                                    ? "Uploading\u2026"
+                                    : effectiveUploadEncrypt
+                                      ? "Encrypt & upload"
+                                      : "Upload to Walrus"}
+                                </button>
+
+                                {effectiveUploadEncrypt && !isSealConfigured ? (
+                                  <p className="feedback-error">
+                                    Add <code>VITE_SEAL_POLICY_PACKAGE_ID</code>{" "}
+                                    after publishing the whitelist package to
+                                    enable encrypted uploads.
+                                  </p>
+                                ) : null}
+
+                                {uploadError ? (
+                                  <p className="feedback-error">
+                                    {uploadError}
+                                  </p>
+                                ) : null}
+
+                                {uploadFeedback?.kind === "newly-created" ? (
+                                  <p className="feedback-success">
+                                    Uploaded. Object{" "}
+                                    <span className="mono">
+                                      {shortenObjectId(uploadFeedback.objectId)}
+                                    </span>{" "}
+                                    stored until epoch{" "}
+                                    {uploadFeedback.storedUntilEpoch}.
+                                  </p>
+                                ) : null}
+
+                                {uploadFeedback?.kind ===
+                                "already-certified" ? (
+                                  <p className="feedback-info">
+                                    Already stored. Blob{" "}
+                                    <span className="mono">
+                                      {shortenBlobId(uploadFeedback.blobId)}
+                                    </span>{" "}
+                                    until epoch{" "}
+                                    {uploadFeedback.storedUntilEpoch}.
+                                  </p>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      <div className="bucket-table">
+                        <div className="bucket-table-head">
+                          <span>Name</span>
+                          <span>Type</span>
+                          <span>Access</span>
+                          <span>Actions</span>
+                        </div>
                         <button
-                          className="bucket-row bucket-folder-row"
-                          key={folderPath}
+                          className="bucket-row bucket-upload-row"
                           onClick={() => {
-                            const directPolicy = folderPolicies.find(
-                              (policy) => policy.folderPath === folderPath,
-                            );
-                            setUploadFolderPath(folderPath);
-                            setFolderPolicyWhitelistId(
-                              directPolicy?.whitelistId ?? "",
-                            );
-                            setFolderPolicyFeedback(null);
-                            setIsRoomUploadOpen(false);
+                            setUploadError(null);
+                            setUploadFeedback(null);
+                            setIsRoomUploadOpen((isOpen) => !isOpen);
                           }}
                           type="button"
                         >
-                          <span className="bucket-name">
+                          <span className="bucket-upload-row-label">
                             <span
-                              className="bucket-item-icon"
+                              className="bucket-upload-row-icon"
                               aria-hidden="true"
                             >
-                              📁
+                              {isRoomUploadOpen ? "×" : "+"}
                             </span>
-                            {getFolderName(folderPath)}/
-                          </span>
-                          <span className="meta-chip meta-chip-folder">
-                            folder
-                          </span>
-                          <span className="hint-text">
-                            {inheritedPolicy
-                              ? inheritedPolicy.whitelistName
-                              : "private"}
+                            {isRoomUploadOpen ? "Close upload" : "Upload file"}
                           </span>
                           <span />
+                          <span />
+                          <span />
                         </button>
-                      );
-                    })}
-                    {currentRoomFiles.map((file) => {
-                      const localMetadata = getStoredLocalMetadata(
-                        file.objectId,
-                      );
-                      const linkedWhitelist = getStoredWhitelist(
-                        localMetadata?.whitelistId ?? null,
-                      );
-
-                      return (
-                        <div className="bucket-row" key={file.objectId}>
-                          <span className="bucket-name">
-                            <span
-                              className="bucket-item-icon"
-                              aria-hidden="true"
-                            >
-                              {getFileTypeIcon(file.contentType, file.fileName)}
-                            </span>
-                            {getDisplayFileName(file)}
-                          </span>
-                          <span className="meta-chip">
-                            {file.contentType ?? "file"}
-                          </span>
-                          <span className="hint-text">
-                            {linkedWhitelist?.name ?? "private"}
-                          </span>
-                          <span className="bucket-actions">
-                            {localMetadata?.keyId ? (
-                              <button
-                                className="btn btn-ghost btn-sm"
-                                onClick={() =>
-                                  void handleCopy(
-                                    `access-${file.objectId}`,
-                                    createAccessPayload(file, localMetadata),
-                                  )
-                                }
-                                type="button"
+                        {uploadFolderPath !== "/" ? (
+                          <button
+                            className="bucket-row bucket-folder-row"
+                            onClick={() => {
+                              const parentPath =
+                                getParentFolderPath(uploadFolderPath);
+                              const directPolicy = folderPolicies.find(
+                                (policy) => policy.folderPath === parentPath,
+                              );
+                              setUploadFolderPath(parentPath);
+                              setFolderPolicyWhitelistId(
+                                directPolicy?.whitelistId ?? "",
+                              );
+                            }}
+                            type="button"
+                          >
+                            <span className="bucket-name">
+                              <span
+                                className="bucket-item-icon"
+                                aria-hidden="true"
                               >
-                                {copiedKey === `access-${file.objectId}`
-                                  ? "Copied"
-                                  : "Link"}
-                              </button>
-                            ) : null}
+                                📂
+                              </span>
+                              ../
+                            </span>
+                            <span className="meta-chip meta-chip-folder">
+                              folder
+                            </span>
+                            <span className="hint-text">parent</span>
+                            <span />
+                          </button>
+                        ) : null}
+                        {currentRoomFolders.map((folderPath) => {
+                          const inheritedPolicy = resolveFolderAccessPolicy(
+                            folderPath,
+                            folderPolicies,
+                          );
+
+                          return (
                             <button
-                              className="btn btn-outline btn-sm"
-                              onClick={() =>
-                                void (localMetadata?.keyId
-                                  ? handleEncryptedDownload(file, localMetadata)
-                                  : handleDownload(
-                                      file.downloadUrl,
-                                      file.fileName !==
-                                        `blob-${file.blobId.slice(0, 10)}`
-                                        ? file.fileName
-                                        : file.objectId,
-                                      file.contentType,
-                                      file.objectId,
-                                    ))
-                              }
+                              className="bucket-row bucket-folder-row"
+                              key={folderPath}
+                              onClick={() => {
+                                const directPolicy = folderPolicies.find(
+                                  (policy) => policy.folderPath === folderPath,
+                                );
+                                setUploadFolderPath(folderPath);
+                                setFolderPolicyWhitelistId(
+                                  directPolicy?.whitelistId ?? "",
+                                );
+                                setFolderPolicyFeedback(null);
+                                setIsRoomUploadOpen(false);
+                              }}
                               type="button"
                             >
-                              {downloadingObjectId === file.objectId
-                                ? "…"
-                                : "↓"}
+                              <span className="bucket-name">
+                                <span
+                                  className="bucket-item-icon"
+                                  aria-hidden="true"
+                                >
+                                  📁
+                                </span>
+                                {getFolderName(folderPath)}/
+                              </span>
+                              <span className="meta-chip meta-chip-folder">
+                                folder
+                              </span>
+                              <span className="hint-text">
+                                {inheritedPolicy
+                                  ? inheritedPolicy.whitelistName
+                                  : "private"}
+                              </span>
+                              <span />
                             </button>
-                            {file.deletable ? (
+                          );
+                        })}
+                        {currentRoomFiles.map((file) => {
+                          const localMetadata = getStoredLocalMetadata(
+                            file.objectId,
+                          );
+                          const linkedWhitelist = getStoredWhitelist(
+                            localMetadata?.whitelistId ?? null,
+                          );
+
+                          return (
+                            <div className="bucket-row" key={file.objectId}>
+                              <span className="bucket-name">
+                                <span
+                                  className="bucket-item-icon"
+                                  aria-hidden="true"
+                                >
+                                  {getFileTypeIcon(
+                                    file.contentType,
+                                    file.fileName,
+                                  )}
+                                </span>
+                                {getDisplayFileName(file)}
+                              </span>
+                              <span className="meta-chip">
+                                {file.contentType ?? "file"}
+                              </span>
+                              <span className="hint-text">
+                                {linkedWhitelist?.name ?? "private"}
+                              </span>
+                              <span className="bucket-actions">
+                                {localMetadata?.keyId ? (
+                                  <button
+                                    className="btn btn-ghost btn-sm"
+                                    onClick={() =>
+                                      void handleCopy(
+                                        `access-${file.objectId}`,
+                                        createAccessPayload(
+                                          file,
+                                          localMetadata,
+                                        ),
+                                      )
+                                    }
+                                    type="button"
+                                  >
+                                    {copiedKey === `access-${file.objectId}`
+                                      ? "Copied"
+                                      : "Link"}
+                                  </button>
+                                ) : null}
+                                <button
+                                  className="btn btn-outline btn-sm"
+                                  onClick={() =>
+                                    void (localMetadata?.keyId
+                                      ? handleEncryptedDownload(
+                                          file,
+                                          localMetadata,
+                                        )
+                                      : handleDownload(
+                                          file.downloadUrl,
+                                          file.fileName !==
+                                            `blob-${file.blobId.slice(0, 10)}`
+                                            ? file.fileName
+                                            : file.objectId,
+                                          file.contentType,
+                                          file.objectId,
+                                        ))
+                                  }
+                                  type="button"
+                                >
+                                  {downloadingObjectId === file.objectId
+                                    ? "…"
+                                    : "↓"}
+                                </button>
+                                {file.deletable ? (
+                                  <button
+                                    className="btn btn-danger btn-sm"
+                                    disabled={
+                                      deletingObjectId === file.objectId
+                                    }
+                                    onClick={() => void handleDelete(file)}
+                                    type="button"
+                                  >
+                                    {deletingObjectId === file.objectId
+                                      ? "…"
+                                      : "Delete"}
+                                  </button>
+                                ) : null}
+                              </span>
+                              {fileActionFeedback[file.objectId] ? (
+                                <p className="feedback-error bucket-row-feedback">
+                                  {fileActionFeedback[file.objectId]?.message}
+                                </p>
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                        {currentRoomFolders.length === 0 &&
+                        currentRoomFiles.length === 0 ? (
+                          <p className="state-text bucket-empty">
+                            This folder is empty.
+                          </p>
+                        ) : null}
+                      </div>
+                    </>
+                  ) : (
+                    <div className="shared-room-layout">
+                      {selectedSharedFolder ? (
+                        <div className="bucket-header shared-bucket-header">
+                          <div>
+                            <div className="bucket-breadcrumbs">
+                              {sharedBreadcrumbs.map((crumb) => (
+                                <button
+                                  className="bucket-crumb"
+                                  key={crumb.path}
+                                  onClick={() => {
+                                    setSharedFolderPath(crumb.path);
+                                  }}
+                                  type="button"
+                                >
+                                  {crumb.label}
+                                </button>
+                              ))}
+                            </div>
+                            <h2>
+                              {getFolderName(sharedCurrentPath)}
+                              <span className="count-badge">
+                                {sharedCurrentFolders.length +
+                                  sharedRoomFiles.length}
+                              </span>
+                            </h2>
+                          </div>
+                          <div className="bucket-header-actions">
+                            <span className="folder-policy-chip folder-policy-chip-inherited">
+                              {selectedSharedFolder.teamName}
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="bucket-header shared-bucket-header">
+                          <div>
+                            <h2>
+                              Shared folders
+                              <span className="count-badge">
+                                {sharedFolderItems.length}
+                              </span>
+                            </h2>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="bucket-table">
+                        <div className="bucket-table-head">
+                          <span>Name</span>
+                          <span>Type</span>
+                          <span>Access</span>
+                          <span>Actions</span>
+                        </div>
+
+                        {selectedSharedFolder ? (
+                          <>
+                            {sharedCurrentPath === selectedSharedRootPath ? (
                               <button
-                                className="btn btn-danger btn-sm"
-                                disabled={deletingObjectId === file.objectId}
-                                onClick={() => void handleDelete(file)}
+                                className="bucket-row bucket-folder-row"
+                                onClick={() => {
+                                  setSelectedSharedFolderId(null);
+                                }}
                                 type="button"
                               >
-                                {deletingObjectId === file.objectId
-                                  ? "…"
-                                  : "Delete"}
+                                <span className="bucket-name">
+                                  <span
+                                    className="bucket-item-icon"
+                                    aria-hidden="true"
+                                  >
+                                    📂
+                                  </span>
+                                  ../ shared folders
+                                </span>
+                                <span className="meta-chip meta-chip-folder">
+                                  folder
+                                </span>
+                                <span className="hint-text">back</span>
+                                <span />
                               </button>
                             ) : null}
-                          </span>
-                          {fileActionFeedback[file.objectId] ? (
-                            <p className="feedback-error bucket-row-feedback">
-                              {fileActionFeedback[file.objectId]?.message}
-                            </p>
-                          ) : null}
-                        </div>
-                      );
-                    })}
-                    {currentRoomFolders.length === 0 &&
-                    currentRoomFiles.length === 0 ? (
-                      <p className="state-text bucket-empty">
-                        This folder is empty.
-                      </p>
-                    ) : null}
-                  </div>
+
+                            {sharedCurrentPath !== selectedSharedRootPath ? (
+                              <button
+                                className="bucket-row bucket-folder-row"
+                                onClick={() => {
+                                  const parentPath =
+                                    getParentFolderPath(sharedCurrentPath);
+
+                                  if (
+                                    isSameOrChildFolder(
+                                      parentPath,
+                                      selectedSharedRootPath,
+                                    )
+                                  ) {
+                                    setSharedFolderPath(parentPath);
+                                  } else {
+                                    setSharedFolderPath(selectedSharedRootPath);
+                                  }
+                                }}
+                                type="button"
+                              >
+                                <span className="bucket-name">
+                                  <span
+                                    className="bucket-item-icon"
+                                    aria-hidden="true"
+                                  >
+                                    📂
+                                  </span>
+                                  ../
+                                </span>
+                                <span className="meta-chip meta-chip-folder">
+                                  folder
+                                </span>
+                                <span className="hint-text">parent</span>
+                                <span />
+                              </button>
+                            ) : null}
+
+                            {sharedCurrentFolders.map((folderPath) => (
+                              <button
+                                className="bucket-row bucket-folder-row"
+                                key={folderPath}
+                                onClick={() => setSharedFolderPath(folderPath)}
+                                type="button"
+                              >
+                                <span className="bucket-name">
+                                  <span
+                                    className="bucket-item-icon"
+                                    aria-hidden="true"
+                                  >
+                                    📁
+                                  </span>
+                                  {getFolderName(folderPath)}/
+                                </span>
+                                <span className="meta-chip meta-chip-folder">
+                                  folder
+                                </span>
+                                <span className="hint-text">shared folder</span>
+                                <span />
+                              </button>
+                            ))}
+
+                            {sharedRoomFiles.map((file) => (
+                              <div className="bucket-row" key={file.objectId}>
+                                <span className="bucket-name">
+                                  <span
+                                    className="bucket-item-icon"
+                                    aria-hidden="true"
+                                  >
+                                    {getFileTypeIcon(
+                                      file.contentType,
+                                      file.fileName ?? undefined,
+                                    )}
+                                  </span>
+                                  {file.fileName ?? file.objectId}
+                                </span>
+                                <span className="meta-chip">
+                                  {file.contentType ?? "file"}
+                                </span>
+                                <span className="hint-text">
+                                  shared by{" "}
+                                  {shortenAddress(
+                                    selectedSharedFolder.ownerAddress,
+                                  )}
+                                </span>
+                                <span className="bucket-actions">
+                                  <button
+                                    className="btn btn-outline btn-sm"
+                                    onClick={() =>
+                                      void handleSharedFileAccessDownload(file)
+                                    }
+                                    type="button"
+                                  >
+                                    {downloadingObjectId === file.objectId
+                                      ? "…"
+                                      : "↓"}
+                                  </button>
+                                </span>
+                              </div>
+                            ))}
+                            {sharedCurrentFolders.length === 0 &&
+                            sharedRoomFiles.length === 0 ? (
+                              <p className="state-text bucket-empty">
+                                This shared folder is empty.
+                              </p>
+                            ) : null}
+                          </>
+                        ) : (
+                          <>
+                            {sharedFolderItems.map((item) => (
+                              <button
+                                className="bucket-row bucket-folder-row"
+                                key={item.id}
+                                onClick={() => {
+                                  setSelectedSharedFolderId(item.id);
+                                  setSharedFolderPath(
+                                    normalizeFolderPath(item.folderPath),
+                                  );
+                                }}
+                                type="button"
+                              >
+                                <span className="bucket-name">
+                                  <span
+                                    className="bucket-item-icon"
+                                    aria-hidden="true"
+                                  >
+                                    📁
+                                  </span>
+                                  {shortenAddress(item.ownerAddress)}/
+                                  {getFolderName(item.folderPath)}
+                                </span>
+                                <span className="meta-chip meta-chip-folder">
+                                  folder
+                                </span>
+                                <span className="hint-text">
+                                  {item.teamName}
+                                </span>
+                                <span />
+                              </button>
+                            ))}
+                            {sharedFolderItems.length === 0 ? (
+                              <p className="state-text bucket-empty">
+                                No folders shared with this wallet yet.
+                              </p>
+                            ) : null}
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </section>
               ) : null}
 

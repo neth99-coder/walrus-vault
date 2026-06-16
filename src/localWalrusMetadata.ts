@@ -46,11 +46,40 @@ export type DeletedBlobRecord = {
   uploadedAt: string | null;
 };
 
+export type LocalSharedFolderRecord = {
+  myWallet: string;
+  sharedFolder: string;
+  teamId: string;
+  teamName: string;
+  teamOwner: string;
+  updatedAt: string;
+};
+
+export type LocalSharedWalrusFileMetadata = {
+  blobId: string;
+  contentType: string | null;
+  fileName: string | null;
+  folderPath: string | null;
+  keyId: string | null;
+  myWallet: string;
+  objectId: string;
+  packageId: string | null;
+  sharedFolder: string;
+  teamId: string;
+  teamName: string;
+  teamOwner: string;
+  uploadedAt: string | null;
+  whitelistId: string | null;
+  whitelistName: string | null;
+};
+
 type LocalWalrusMetadataState = {
   active: LocalWalrusFileMetadata[];
   deleted: DeletedBlobRecord[];
   folders: string[];
   folderPolicies: LocalFolderAccessPolicy[];
+  sharedFolders: LocalSharedFolderRecord[];
+  sharedFiles: LocalSharedWalrusFileMetadata[];
   whitelists: LocalWalrusWhitelist[];
 };
 
@@ -66,6 +95,8 @@ function getEmptyState(): LocalWalrusMetadataState {
     deleted: [],
     folders: ["/"],
     folderPolicies: [],
+    sharedFolders: [],
+    sharedFiles: [],
     whitelists: [],
   };
 }
@@ -100,6 +131,12 @@ function readState(network: string, address: string): LocalWalrusMetadataState {
       folders: normalizeLocalFolderPaths(parsed.folders),
       folderPolicies: Array.isArray(parsed.folderPolicies)
         ? parsed.folderPolicies.map(normalizeLocalFolderAccessPolicy)
+        : [],
+      sharedFolders: Array.isArray(parsed.sharedFolders)
+        ? parsed.sharedFolders.map(normalizeLocalSharedFolderRecord)
+        : [],
+      sharedFiles: Array.isArray(parsed.sharedFiles)
+        ? parsed.sharedFiles.map(normalizeLocalSharedWalrusFileMetadata)
         : [],
       whitelists: Array.isArray(parsed.whitelists)
         ? parsed.whitelists.map(normalizeLocalWalrusWhitelist)
@@ -169,7 +206,8 @@ function normalizeLocalFolderAccessPolicy(
       typeof policy.updatedAt === "string"
         ? policy.updatedAt
         : new Date().toISOString(),
-    whitelistId: typeof policy.whitelistId === "string" ? policy.whitelistId : "",
+    whitelistId:
+      typeof policy.whitelistId === "string" ? policy.whitelistId : "",
     whitelistName:
       typeof policy.whitelistName === "string"
         ? policy.whitelistName
@@ -198,6 +236,78 @@ function normalizeLocalWalrusWhitelist(
       typeof whitelist.ownerAddress === "string" ? whitelist.ownerAddress : "",
     packageId:
       typeof whitelist.packageId === "string" ? whitelist.packageId : null,
+  };
+}
+
+function normalizeWalletAddress(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function normalizeLocalSharedFolderRecord(
+  record: Partial<LocalSharedFolderRecord>,
+): LocalSharedFolderRecord {
+  return {
+    myWallet:
+      typeof record.myWallet === "string" && record.myWallet.trim()
+        ? normalizeWalletAddress(record.myWallet)
+        : "",
+    sharedFolder:
+      typeof record.sharedFolder === "string"
+        ? normalizeFolderPath(record.sharedFolder)
+        : "/",
+    teamId: typeof record.teamId === "string" ? record.teamId : "",
+    teamName:
+      typeof record.teamName === "string" ? record.teamName : "Untitled team",
+    teamOwner:
+      typeof record.teamOwner === "string"
+        ? normalizeWalletAddress(record.teamOwner)
+        : "",
+    updatedAt:
+      typeof record.updatedAt === "string"
+        ? record.updatedAt
+        : new Date().toISOString(),
+  };
+}
+
+function normalizeLocalSharedWalrusFileMetadata(
+  metadata: Partial<LocalSharedWalrusFileMetadata>,
+): LocalSharedWalrusFileMetadata {
+  return {
+    blobId: typeof metadata.blobId === "string" ? metadata.blobId : "",
+    contentType:
+      typeof metadata.contentType === "string" ? metadata.contentType : null,
+    fileName: typeof metadata.fileName === "string" ? metadata.fileName : null,
+    folderPath:
+      typeof metadata.folderPath === "string" ? metadata.folderPath : null,
+    keyId: typeof metadata.keyId === "string" ? metadata.keyId : null,
+    myWallet:
+      typeof metadata.myWallet === "string" && metadata.myWallet.trim()
+        ? normalizeWalletAddress(metadata.myWallet)
+        : "",
+    objectId: typeof metadata.objectId === "string" ? metadata.objectId : "",
+    packageId:
+      typeof metadata.packageId === "string" ? metadata.packageId : null,
+    sharedFolder:
+      typeof metadata.sharedFolder === "string"
+        ? normalizeFolderPath(metadata.sharedFolder)
+        : "/",
+    teamId: typeof metadata.teamId === "string" ? metadata.teamId : "",
+    teamName:
+      typeof metadata.teamName === "string"
+        ? metadata.teamName
+        : "Untitled team",
+    teamOwner:
+      typeof metadata.teamOwner === "string"
+        ? normalizeWalletAddress(metadata.teamOwner)
+        : "",
+    uploadedAt:
+      typeof metadata.uploadedAt === "string" ? metadata.uploadedAt : null,
+    whitelistId:
+      typeof metadata.whitelistId === "string" ? metadata.whitelistId : null,
+    whitelistName:
+      typeof metadata.whitelistName === "string"
+        ? metadata.whitelistName
+        : null,
   };
 }
 
@@ -283,6 +393,8 @@ export function saveLocalWalrusFile(
     deleted,
     folders: current.folders,
     folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles,
     whitelists: current.whitelists,
   });
 }
@@ -317,6 +429,8 @@ export function patchLocalWalrusFileMetadata(
     deleted: current.deleted,
     folders: current.folders,
     folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles,
     whitelists: current.whitelists,
   });
 
@@ -335,6 +449,8 @@ export function saveLocalWalrusWhitelist(
     deleted: current.deleted,
     folders: current.folders,
     folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles,
     whitelists: [
       normalizeLocalWalrusWhitelist(whitelist),
       ...current.whitelists.filter((item) => item.id !== whitelist.id),
@@ -373,6 +489,8 @@ export function patchLocalWalrusWhitelist(
     deleted: current.deleted,
     folders: current.folders,
     folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles,
     whitelists,
   });
 
@@ -406,13 +524,18 @@ export function markLocalWalrusFileDeleted(
     ],
     folders: current.folders,
     folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles,
     whitelists: current.whitelists,
   });
 
   return deletedRecord;
 }
 
-export function listLocalFolderAccessPolicies(network: string, address: string) {
+export function listLocalFolderAccessPolicies(
+  network: string,
+  address: string,
+) {
   return readState(network, address).folderPolicies.sort((left, right) =>
     left.folderPath.localeCompare(right.folderPath),
   );
@@ -435,6 +558,8 @@ export function saveLocalFolder(
     deleted: current.deleted,
     folders: normalizeLocalFolderPaths([...current.folders, normalizedPath]),
     folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles,
     whitelists: current.whitelists,
   });
 
@@ -459,6 +584,8 @@ export function saveLocalFolderAccessPolicy(
         (item) => item.folderPath !== normalized.folderPath,
       ),
     ],
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles,
     whitelists: current.whitelists,
   });
 }
@@ -478,6 +605,210 @@ export function deleteLocalFolderAccessPolicy(
     folderPolicies: current.folderPolicies.filter(
       (item) => item.folderPath !== normalizedPath,
     ),
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles,
+    whitelists: current.whitelists,
+  });
+}
+
+export function listLocalSharedFolders(network: string, address: string) {
+  const normalizedAddress = normalizeWalletAddress(address);
+
+  return readState(network, normalizedAddress)
+    .sharedFolders.filter((record) => record.myWallet === normalizedAddress)
+    .sort(
+      (left, right) =>
+        Number(new Date(right.updatedAt)) - Number(new Date(left.updatedAt)),
+    );
+}
+
+export function saveLocalSharedFolder(
+  network: string,
+  address: string,
+  record: LocalSharedFolderRecord,
+) {
+  const normalizedAddress = normalizeWalletAddress(address);
+  const current = readState(network, normalizedAddress);
+  const normalized = normalizeLocalSharedFolderRecord({
+    ...record,
+    myWallet: normalizedAddress,
+  });
+
+  const deduped = current.sharedFolders.filter(
+    (item) =>
+      !(
+        item.myWallet === normalized.myWallet &&
+        item.teamId === normalized.teamId &&
+        item.teamOwner === normalized.teamOwner &&
+        item.sharedFolder === normalized.sharedFolder
+      ),
+  );
+
+  writeState(network, normalizedAddress, {
+    active: current.active,
+    deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
+    sharedFolders: [normalized, ...deduped],
+    sharedFiles: current.sharedFiles,
+    whitelists: current.whitelists,
+  });
+}
+
+export function removeLocalSharedFolder(
+  network: string,
+  address: string,
+  options: {
+    sharedFolder?: string;
+    teamId: string;
+    teamOwner: string;
+  },
+) {
+  const normalizedAddress = normalizeWalletAddress(address);
+  const current = readState(network, normalizedAddress);
+  const normalizedFolder =
+    typeof options.sharedFolder === "string"
+      ? normalizeFolderPath(options.sharedFolder)
+      : null;
+  const normalizedOwner = normalizeWalletAddress(options.teamOwner);
+
+  writeState(network, normalizedAddress, {
+    active: current.active,
+    deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders.filter((item) => {
+      if (
+        item.teamId !== options.teamId ||
+        item.teamOwner !== normalizedOwner
+      ) {
+        return true;
+      }
+
+      if (normalizedFolder === null) {
+        return false;
+      }
+
+      return item.sharedFolder !== normalizedFolder;
+    }),
+    sharedFiles: current.sharedFiles,
+    whitelists: current.whitelists,
+  });
+}
+
+export function listLocalSharedWalrusFiles(network: string, address: string) {
+  const normalizedAddress = normalizeWalletAddress(address);
+
+  return readState(network, normalizedAddress)
+    .sharedFiles.filter((record) => record.myWallet === normalizedAddress)
+    .sort((left, right) =>
+      (left.fileName ?? left.objectId).localeCompare(
+        right.fileName ?? right.objectId,
+      ),
+    );
+}
+
+export function saveLocalSharedWalrusFile(
+  network: string,
+  address: string,
+  file: LocalSharedWalrusFileMetadata,
+) {
+  const normalizedAddress = normalizeWalletAddress(address);
+  const current = readState(network, normalizedAddress);
+  const normalized = normalizeLocalSharedWalrusFileMetadata({
+    ...file,
+    myWallet: normalizedAddress,
+  });
+
+  const sharedFiles = current.sharedFiles.filter(
+    (item) =>
+      !(
+        item.myWallet === normalized.myWallet &&
+        item.teamId === normalized.teamId &&
+        item.teamOwner === normalized.teamOwner &&
+        item.sharedFolder === normalized.sharedFolder &&
+        item.objectId === normalized.objectId
+      ),
+  );
+
+  writeState(network, normalizedAddress, {
+    active: current.active,
+    deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: [normalized, ...sharedFiles],
+    whitelists: current.whitelists,
+  });
+}
+
+export function removeLocalSharedWalrusFiles(
+  network: string,
+  address: string,
+  options: {
+    sharedFolder?: string;
+    teamId: string;
+    teamOwner: string;
+  },
+) {
+  const normalizedAddress = normalizeWalletAddress(address);
+  const current = readState(network, normalizedAddress);
+  const normalizedFolder =
+    typeof options.sharedFolder === "string"
+      ? normalizeFolderPath(options.sharedFolder)
+      : null;
+  const normalizedOwner = normalizeWalletAddress(options.teamOwner);
+
+  writeState(network, normalizedAddress, {
+    active: current.active,
+    deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles.filter((item) => {
+      if (
+        item.teamId !== options.teamId ||
+        item.teamOwner !== normalizedOwner
+      ) {
+        return true;
+      }
+
+      if (normalizedFolder === null) {
+        return false;
+      }
+
+      return item.sharedFolder !== normalizedFolder;
+    }),
+    whitelists: current.whitelists,
+  });
+}
+
+export function removeLocalSharedWalrusFile(
+  network: string,
+  address: string,
+  options: {
+    objectId: string;
+    teamId: string;
+    teamOwner: string;
+  },
+) {
+  const normalizedAddress = normalizeWalletAddress(address);
+  const current = readState(network, normalizedAddress);
+  const normalizedOwner = normalizeWalletAddress(options.teamOwner);
+
+  writeState(network, normalizedAddress, {
+    active: current.active,
+    deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
+    sharedFolders: current.sharedFolders,
+    sharedFiles: current.sharedFiles.filter((item) => {
+      return !(
+        item.objectId === options.objectId &&
+        item.teamId === options.teamId &&
+        item.teamOwner === normalizedOwner
+      );
+    }),
     whitelists: current.whitelists,
   });
 }
