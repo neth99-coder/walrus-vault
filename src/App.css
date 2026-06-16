@@ -1220,6 +1220,412 @@
   gap: 8px;
 }
 
+.folder-policy-chip {
+  margin-right: 10px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: #ecfdf5;
+  color: #047857;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.folder-policy-chip-inherited {
+  background: #eff6ff;
+  color: #1d4ed8;
+}
+
+.meta-chip-folder {
+  color: #374151;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+}
+
+.bucket-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.bucket-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0 0;
+  font-size: 1.15rem;
+  color: #111827;
+  text-transform: capitalize;
+}
+
+.bucket-header-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bucket-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+
+.bucket-crumb {
+  border: 0;
+  background: transparent;
+  color: #2563eb;
+  padding: 0;
+  font: inherit;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  text-transform: capitalize;
+}
+
+.bucket-crumb:not(:last-child)::after {
+  content: "/";
+  margin-left: 4px;
+  color: #94a3b8;
+}
+
+.bucket-policy-bar,
+.bucket-create-bar,
+.bucket-upload-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  background: #f8fafc;
+}
+
+.bucket-policy-form {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.bucket-create-bar {
+  background: #ffffff;
+}
+
+.bucket-table {
+  display: grid;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.bucket-table-head,
+.bucket-row {
+  display: grid;
+  grid-template-columns:
+    minmax(220px, 1fr) minmax(90px, 0.35fr) minmax(110px, 0.45fr)
+    minmax(150px, auto);
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 12px 14px;
+}
+
+.bucket-table-head {
+  background: #f8fafc;
+  border-bottom: 1px solid #e5e7eb;
+  color: #64748b;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.bucket-row {
+  border: 0;
+  border-bottom: 1px solid #f1f5f9;
+  background: #fff;
+  color: #111827;
+  font: inherit;
+  text-align: left;
+}
+
+.bucket-row:last-child {
+  border-bottom: 0;
+}
+
+.bucket-folder-row {
+  cursor: pointer;
+}
+
+.bucket-folder-row:hover {
+  background: #f8fafc;
+}
+
+.bucket-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 0.9rem;
+  font-weight: 700;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bucket-folder-row .bucket-name {
+  color: #1d4ed8;
+}
+
+.bucket-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.bucket-empty {
+  padding: 18px 14px;
+}
+
+.bucket-row-feedback {
+  grid-column: 1 / -1;
+}
+
+/* ─── Upload-file row at bottom of bucket table ──────────── */
+.bucket-upload-row {
+  border-top: 1px dashed #e2e8f0;
+  background: transparent;
+  cursor: pointer;
+  transition: background 120ms ease;
+  border-bottom: 0;
+}
+
+.bucket-upload-row:hover {
+  background: #f0fdf4;
+}
+
+.bucket-upload-row-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: #16a34a;
+  grid-column: 1 / -1;
+}
+
+.bucket-upload-row-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  background: #dcfce7;
+  color: #16a34a;
+  font-size: 1rem;
+  font-weight: 700;
+  line-height: 1;
+  flex-shrink: 0;
+}
+
+/* ─── Bucket item icon (file/folder emoji) ───────────────── */
+.bucket-item-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+/* ─── Data Room drag-and-drop upload zone ────────────────── */
+.bucket-dropzone {
+  position: relative;
+  border: 2px dashed #d1d5db;
+  border-radius: 14px;
+  background: #fafafa;
+  transition:
+    border-color 150ms ease,
+    background 150ms ease;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.bucket-dropzone:hover {
+  border-color: #9ca3af;
+  background: #f3f4f6;
+}
+
+.bucket-dropzone-drag {
+  border-color: #2563eb !important;
+  background: #eff6ff !important;
+}
+
+.bucket-dropzone-filled {
+  border-style: solid;
+  border-color: #6ee7b7;
+  background: #f0fdf4;
+}
+
+.bucket-dropzone-filled:hover {
+  border-color: #34d399;
+  background: #ecfdf5;
+}
+
+.bucket-dropzone-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 28px 20px;
+  cursor: pointer;
+  width: 100%;
+  box-sizing: border-box;
+  text-align: center;
+}
+
+.bucket-dropzone-upload-icon {
+  font-size: 2rem;
+  line-height: 1;
+  color: #9ca3af;
+  transition: color 150ms ease;
+}
+
+.bucket-dropzone-drag .bucket-dropzone-upload-icon {
+  color: #2563eb;
+}
+
+.bucket-dropzone-text {
+  font-size: 0.86rem;
+  color: #6b7280;
+}
+
+.bucket-dropzone-link {
+  color: #2563eb;
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.bucket-dropzone-file-emoji {
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+.bucket-dropzone-file-info {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.bucket-dropzone-filename {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: #111827;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+.bucket-dropzone-filesize {
+  font-size: 0.78rem;
+  color: #6b7280;
+}
+
+.bucket-dropzone-change {
+  font-size: 0.73rem;
+  color: #9ca3af;
+  margin-top: 2px;
+}
+
+/* ─── Modal ──────────────────────────────────────────────── */
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: rgba(2, 7, 26, 0.72);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.upload-modal {
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  background: #071025;
+  box-shadow:
+    0 24px 80px rgba(0, 0, 0, 0.45),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.upload-modal-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 18px 20px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.upload-modal-eyebrow {
+  margin: 0 0 4px;
+  color: #67e8f9;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.upload-modal h3 {
+  margin: 0;
+  color: #f8fafc;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.modal-close-btn {
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.05);
+  color: #cbd5e1;
+  padding: 7px 12px;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.modal-close-btn:hover {
+  border-color: rgba(6, 182, 212, 0.4);
+  background: rgba(255, 255, 255, 0.09);
+  color: #ffffff;
+}
+
+.upload-modal .bucket-upload-panel {
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
 /* ─── Info tooltip (ⓘ) ──────────────────────────────────── */
 .info-tip {
   position: relative;
@@ -1323,6 +1729,31 @@
 
   .file-share-form {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bucket-header {
+    flex-direction: column;
+  }
+
+  .bucket-header-actions {
+    justify-content: flex-start;
+  }
+
+  .bucket-policy-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .bucket-table-head {
+    display: none;
+  }
+
+  .bucket-row {
+    grid-template-columns: minmax(0, 1fr);
+    align-items: flex-start;
+  }
+
+  .bucket-actions {
+    justify-content: flex-start;
   }
 
   .whitelist-card-section-header {
@@ -2650,6 +3081,27 @@ select.text-input option {
 .toggle-field input {
   accent-color: #06b6d4;
 }
+.text-input:disabled,
+.file-picker-btn:disabled,
+select.text-input:disabled {
+  opacity: 1;
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #94a3b8;
+  -webkit-text-fill-color: #94a3b8;
+}
+.text-input:disabled::placeholder {
+  color: #64748b;
+  -webkit-text-fill-color: #64748b;
+}
+.toggle-field:has(input:disabled) {
+  color: #94a3b8;
+  opacity: 1;
+}
+.toggle-field input:disabled {
+  opacity: 0.85;
+  cursor: not-allowed;
+}
 
 /* ── Endpoints ──────────────────────────────────────────── */
 .endpoints {
@@ -2681,6 +3133,143 @@ select.text-input option {
   color: #67e8f9;
   background: rgba(6, 182, 212, 0.08);
   border-color: rgba(6, 182, 212, 0.2);
+}
+
+/* ── Data room ──────────────────────────────────────────── */
+.bucket-header h2 {
+  color: #e2e8f0;
+}
+
+.bucket-crumb {
+  color: #60a5fa;
+}
+.bucket-crumb:not(:last-child)::after {
+  color: #475569;
+}
+
+.folder-policy-chip {
+  background: rgba(16, 185, 129, 0.14);
+  color: #a7f3d0;
+  border: 1px solid rgba(52, 211, 153, 0.28);
+}
+
+.bucket-policy-bar,
+.bucket-create-bar,
+.bucket-upload-panel {
+  background: rgba(255, 255, 255, 0.045);
+  border-color: rgba(255, 255, 255, 0.1);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+}
+
+.bucket-dropzone {
+  background: rgba(255, 255, 255, 0.04);
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+.bucket-dropzone:hover {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.22);
+}
+
+.bucket-dropzone-drag {
+  background: rgba(37, 99, 235, 0.15) !important;
+  border-color: #3b82f6 !important;
+}
+
+.bucket-dropzone-filled {
+  background: rgba(16, 185, 129, 0.1);
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+.bucket-dropzone-filled:hover {
+  background: rgba(16, 185, 129, 0.15);
+  border-color: rgba(52, 211, 153, 0.55);
+}
+
+.bucket-dropzone-upload-icon {
+  color: #475569;
+}
+
+.bucket-dropzone-drag .bucket-dropzone-upload-icon {
+  color: #60a5fa;
+}
+
+.bucket-dropzone-text {
+  color: #94a3b8;
+}
+
+.bucket-dropzone-link {
+  color: #60a5fa;
+}
+
+.bucket-dropzone-filename {
+  color: #e2e8f0;
+}
+
+.bucket-dropzone-filesize {
+  color: #64748b;
+}
+
+.bucket-dropzone-change {
+  color: #475569;
+}
+
+.bucket-table {
+  background: rgba(255, 255, 255, 0.035);
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.bucket-table-head {
+  background: rgba(255, 255, 255, 0.06);
+  border-bottom-color: rgba(255, 255, 255, 0.09);
+  color: #94a3b8;
+}
+
+.bucket-row {
+  background: rgba(255, 255, 255, 0.025);
+  border-bottom-color: rgba(255, 255, 255, 0.07);
+  color: #e2e8f0;
+}
+
+.bucket-folder-row:hover,
+.bucket-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.bucket-name {
+  color: #e2e8f0;
+}
+
+.bucket-folder-row .bucket-name {
+  color: #67e8f9;
+}
+
+.bucket-row .hint-text {
+  color: #94a3b8;
+}
+
+.bucket-upload-row {
+  border-top-color: rgba(255, 255, 255, 0.08);
+}
+
+.bucket-upload-row:hover {
+  background: rgba(16, 185, 129, 0.07);
+}
+
+.bucket-upload-row-label {
+  color: #34d399;
+}
+
+.bucket-upload-row-icon {
+  background: rgba(16, 185, 129, 0.15);
+  color: #34d399;
+}
+
+.meta-chip,
+.meta-chip-folder {
+  background: rgba(255, 255, 255, 0.07);
+  border-color: rgba(255, 255, 255, 0.1);
+  color: #cbd5e1;
 }
 
 /* ── Alert ──────────────────────────────────────────────── */

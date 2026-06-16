@@ -5,6 +5,7 @@ export type LocalWalrusFileMetadata = {
   contentType: string | null;
   encrypted: boolean;
   fileName: string | null;
+  folderPath: string | null;
   keyId: string | null;
   objectId: string;
   packageId: string | null;
@@ -25,6 +26,13 @@ export type LocalWalrusWhitelist = {
   packageId: string | null;
 };
 
+export type LocalFolderAccessPolicy = {
+  folderPath: string;
+  updatedAt: string;
+  whitelistId: string;
+  whitelistName: string;
+};
+
 export type DeletedBlobRecord = {
   blobId: string | null;
   contentType: string | null;
@@ -41,6 +49,8 @@ export type DeletedBlobRecord = {
 type LocalWalrusMetadataState = {
   active: LocalWalrusFileMetadata[];
   deleted: DeletedBlobRecord[];
+  folders: string[];
+  folderPolicies: LocalFolderAccessPolicy[];
   whitelists: LocalWalrusWhitelist[];
 };
 
@@ -54,6 +64,8 @@ function getEmptyState(): LocalWalrusMetadataState {
   return {
     active: [],
     deleted: [],
+    folders: ["/"],
+    folderPolicies: [],
     whitelists: [],
   };
 }
@@ -85,6 +97,10 @@ function readState(network: string, address: string): LocalWalrusMetadataState {
         ? parsed.active.map(normalizeLocalWalrusFileMetadata)
         : [],
       deleted: Array.isArray(parsed.deleted) ? parsed.deleted : [],
+      folders: normalizeLocalFolderPaths(parsed.folders),
+      folderPolicies: Array.isArray(parsed.folderPolicies)
+        ? parsed.folderPolicies.map(normalizeLocalFolderAccessPolicy)
+        : [],
       whitelists: Array.isArray(parsed.whitelists)
         ? parsed.whitelists.map(normalizeLocalWalrusWhitelist)
         : [],
@@ -92,6 +108,22 @@ function readState(network: string, address: string): LocalWalrusMetadataState {
   } catch {
     return getEmptyState();
   }
+}
+
+function normalizeLocalFolderPaths(folders: unknown): string[] {
+  const normalized = new Set<string>(["/"]);
+
+  if (Array.isArray(folders)) {
+    for (const folder of folders) {
+      if (typeof folder === "string") {
+        normalized.add(normalizeFolderPath(folder));
+      }
+    }
+  }
+
+  return Array.from(normalized).sort((left, right) =>
+    left.localeCompare(right),
+  );
 }
 
 function normalizeLocalWalrusFileMetadata(
@@ -104,6 +136,8 @@ function normalizeLocalWalrusFileMetadata(
     encrypted:
       typeof metadata.encrypted === "boolean" ? metadata.encrypted : false,
     fileName: typeof metadata.fileName === "string" ? metadata.fileName : null,
+    folderPath:
+      typeof metadata.folderPath === "string" ? metadata.folderPath : null,
     keyId: typeof metadata.keyId === "string" ? metadata.keyId : null,
     objectId: typeof metadata.objectId === "string" ? metadata.objectId : "",
     packageId:
@@ -120,6 +154,26 @@ function normalizeLocalWalrusFileMetadata(
       typeof metadata.whitelistName === "string"
         ? metadata.whitelistName
         : null,
+  };
+}
+
+function normalizeLocalFolderAccessPolicy(
+  policy: Partial<LocalFolderAccessPolicy>,
+): LocalFolderAccessPolicy {
+  return {
+    folderPath:
+      typeof policy.folderPath === "string" && policy.folderPath
+        ? normalizeFolderPath(policy.folderPath)
+        : "/",
+    updatedAt:
+      typeof policy.updatedAt === "string"
+        ? policy.updatedAt
+        : new Date().toISOString(),
+    whitelistId: typeof policy.whitelistId === "string" ? policy.whitelistId : "",
+    whitelistName:
+      typeof policy.whitelistName === "string"
+        ? policy.whitelistName
+        : "Untitled list",
   };
 }
 
@@ -145,6 +199,16 @@ function normalizeLocalWalrusWhitelist(
     packageId:
       typeof whitelist.packageId === "string" ? whitelist.packageId : null,
   };
+}
+
+function normalizeFolderPath(path: string) {
+  const trimmed = path.trim();
+
+  if (!trimmed || trimmed === "/") {
+    return "/";
+  }
+
+  return `/${trimmed.replace(/^\/+|\/+$/g, "")}`;
 }
 
 function writeState(
@@ -190,6 +254,7 @@ export function saveLocalWalrusFile(
     Pick<
       LocalWalrusFileMetadata,
       | "encrypted"
+      | "folderPath"
       | "keyId"
       | "packageId"
       | "whitelistCapId"
@@ -216,6 +281,8 @@ export function saveLocalWalrusFile(
   writeState(network, address, {
     active,
     deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
     whitelists: current.whitelists,
   });
 }
@@ -248,6 +315,8 @@ export function patchLocalWalrusFileMetadata(
   writeState(network, address, {
     active,
     deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
     whitelists: current.whitelists,
   });
 
@@ -264,6 +333,8 @@ export function saveLocalWalrusWhitelist(
   writeState(network, address, {
     active: current.active,
     deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
     whitelists: [
       normalizeLocalWalrusWhitelist(whitelist),
       ...current.whitelists.filter((item) => item.id !== whitelist.id),
@@ -300,6 +371,8 @@ export function patchLocalWalrusWhitelist(
   writeState(network, address, {
     active: current.active,
     deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
     whitelists,
   });
 
@@ -331,8 +404,80 @@ export function markLocalWalrusFileDeleted(
       deletedRecord,
       ...current.deleted.filter((item) => item.objectId !== file.objectId),
     ],
+    folders: current.folders,
+    folderPolicies: current.folderPolicies,
     whitelists: current.whitelists,
   });
 
   return deletedRecord;
+}
+
+export function listLocalFolderAccessPolicies(network: string, address: string) {
+  return readState(network, address).folderPolicies.sort((left, right) =>
+    left.folderPath.localeCompare(right.folderPath),
+  );
+}
+
+export function listLocalFolders(network: string, address: string) {
+  return normalizeLocalFolderPaths(readState(network, address).folders);
+}
+
+export function saveLocalFolder(
+  network: string,
+  address: string,
+  folderPath: string,
+) {
+  const current = readState(network, address);
+  const normalizedPath = normalizeFolderPath(folderPath);
+
+  writeState(network, address, {
+    active: current.active,
+    deleted: current.deleted,
+    folders: normalizeLocalFolderPaths([...current.folders, normalizedPath]),
+    folderPolicies: current.folderPolicies,
+    whitelists: current.whitelists,
+  });
+
+  return normalizedPath;
+}
+
+export function saveLocalFolderAccessPolicy(
+  network: string,
+  address: string,
+  policy: LocalFolderAccessPolicy,
+) {
+  const current = readState(network, address);
+  const normalized = normalizeLocalFolderAccessPolicy(policy);
+
+  writeState(network, address, {
+    active: current.active,
+    deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: [
+      normalized,
+      ...current.folderPolicies.filter(
+        (item) => item.folderPath !== normalized.folderPath,
+      ),
+    ],
+    whitelists: current.whitelists,
+  });
+}
+
+export function deleteLocalFolderAccessPolicy(
+  network: string,
+  address: string,
+  folderPath: string,
+) {
+  const current = readState(network, address);
+  const normalizedPath = normalizeFolderPath(folderPath);
+
+  writeState(network, address, {
+    active: current.active,
+    deleted: current.deleted,
+    folders: current.folders,
+    folderPolicies: current.folderPolicies.filter(
+      (item) => item.folderPath !== normalizedPath,
+    ),
+    whitelists: current.whitelists,
+  });
 }
