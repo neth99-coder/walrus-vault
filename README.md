@@ -27,6 +27,24 @@ With the current UI you can:
 | Seal          | Key release and browser encryption    | Key shares gated by `seal_approve`                                                            |
 | Walrus        | Blob storage                          | Plain bytes or Seal-encrypted bytes                                                           |
 
+### Sui data access
+
+Public fullnode **JSON-RPC has been deprecated** (`fullnode.testnet.sui.io` now rejects every
+`sui_*`/`suix_*` method with "JSON-RPC on public fullnodes has been deprecated"). The app no longer
+uses `SuiJsonRpcClient` anywhere. Instead:
+
+- **gRPC** (`SuiGrpcClient`, configured in `dapp-kit.ts`) is the primary client for everything the
+  unified Sui Core API covers: balances, owned objects, building/signing/executing transactions,
+  Seal's `suiClient`, and waiting for a just-submitted transaction to land.
+- **GraphQL** (`https://graphql.testnet.sui.io/graphql`) covers the handful of free, unauthenticated
+  reads gRPC fullnodes don't serve (and that also aren't available from a short-retention fullnode):
+  querying `HashRegistered` events by type for the public Verify tool (`blobHashRegistry.ts`), and
+  reconstructing an address's deleted-blob history from its sent transactions
+  (`deletedBlobHistory.ts`).
+
+If you fork this app for another network, add matching entries to `GRAPHQL_URLS` in `App.tsx` (and
+`GRPC_URLS` in `dapp-kit.ts`) — only `testnet` is configured today.
+
 ## Supported wallets
 
 ### Enoki Google wallet
@@ -114,8 +132,9 @@ This provides a "zero-knowledge" verification model: a third party can confirm d
 ```
 src/
   App.tsx                  — main UI (wallet, allowlists, upload, download, verify)
-  blobHashRegistry.ts      — build hash-registration transactions; query HashRegistered events
-  dapp-kit.ts              — dApp Kit configuration for Sui testnet
+  blobHashRegistry.ts      — build hash-registration transactions; query HashRegistered events via GraphQL
+  dapp-kit.ts              — dApp Kit configuration for Sui testnet (gRPC client)
+  deletedBlobHistory.ts    — reconstructs deleted-blob history from an address's sent transactions via GraphQL
   enokiSession.ts          — Enoki session helpers
   fileHash.ts              — browser-native SHA-256 via Web Crypto API
   localWalrusMetadata.ts   — local storage model for files, deleted entries, and whitelists
@@ -162,7 +181,6 @@ Create a `.env` file in the project root:
 ```env
 VITE_ENOKI_API_KEY=your_enoki_public_api_key
 VITE_GOOGLE_CLIENT_ID=your_google_oauth_web_client_id
-VITE_SEAL_POLICY_PACKAGE_ID=0x_your_published_move_package
 VITE_WALRUS_PUBLISHER_URL=https://publisher.walrus-testnet.walrus.space
 VITE_WALRUS_AGGREGATOR_URL=https://aggregator.walrus-testnet.walrus.space
 ```
@@ -170,8 +188,8 @@ VITE_WALRUS_AGGREGATOR_URL=https://aggregator.walrus-testnet.walrus.space
 Notes:
 
 - `VITE_ENOKI_API_KEY` and `VITE_GOOGLE_CLIENT_ID` are required by the current app startup flow.
-- `VITE_SEAL_POLICY_PACKAGE_ID` is required for whitelist creation, whitelist updates, encrypted uploads, encrypted downloads, hash registration, and the public Verify tool.
 - `VITE_WALRUS_PUBLISHER_URL` and `VITE_WALRUS_AGGREGATOR_URL` are optional and fall back to Walrus testnet defaults.
+- The published `walrus_vault_policy` package IDs are **hardcoded** as `sealPolicyPackageId` and `hashRegistryPackageId` near the top of `src/App.tsx` rather than read from env. If you publish your own package (see below), update those two constants and rebuild.
 
 ## Enoki setup
 
@@ -247,7 +265,7 @@ sui move build
 sui client publish --gas-budget 100000000
 ```
 
-After publish, copy the package ID and set it as `VITE_SEAL_POLICY_PACKAGE_ID` in `.env`.
+After publish, copy the package ID and set it as `sealPolicyPackageId` (and `hashRegistryPackageId`, if co-deployed) in `src/App.tsx`.
 
 ### 4. Upgrade an existing deployment
 
@@ -390,11 +408,18 @@ This is a known issue with the Enoki path. Use Slush or another standard browser
 
 Whitelist updates, encrypted uploads, and hash registration all require testnet SUI for gas. Make sure the connected wallet has testnet SUI before performing these operations. The public Verify tool never requires gas.
 
+### `Method not found. JSON-RPC on public fullnodes has been deprecated`
+
+This means some code path is still using `SuiJsonRpcClient` / `@mysten/sui/jsonRpc`. The app should
+never construct that client — see [Sui data access](#sui-data-access). If you're extending the app,
+use the gRPC `client` from `useCurrentClient()` (or `dAppKit`) for Core API calls, and the GraphQL
+endpoint (`GRAPHQL_URLS`) for event queries or sender transaction history.
+
 ### Hash registration succeeds but Verify returns no match
 
 Possible causes:
 
-- The package ID in `VITE_SEAL_POLICY_PACKAGE_ID` was changed after the file was uploaded (the events were emitted under a different package ID).
+- `hashRegistryPackageId` in `src/App.tsx` was changed after the file was uploaded (the events were emitted under a different package ID).
 - The file being checked has been modified since upload.
 - The `register_hash` transaction was included in the upload session but the RPC node hasn't indexed the event yet — wait a few seconds and retry.
 

@@ -5,11 +5,13 @@
  * wallet — a `HashRegistered` event is emitted on-chain.
  *
  * Verifiers (no wallet required) call `queryAllBlobHashes` which pages
- * through all `HashRegistered` events via free Sui RPC read calls.
+ * through all `HashRegistered` events via the Sui GraphQL API. Public
+ * fullnode JSON-RPC has been deprecated, so event queries can no longer
+ * go through `SuiJsonRpcClient` — GraphQL is the supported free-read path.
  */
 
 import { Transaction } from "@mysten/sui/transactions";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
+import { SuiGraphQLClient } from "@mysten/sui/graphql";
 
 export const BLOB_HASH_MODULE = "blob_hash_registry";
 export const REGISTER_HASH_FUNCTION = "register_hash";
@@ -95,48 +97,88 @@ function parseHashEntry(
   };
 }
 
+const EVENTS_QUERY = `
+  query BlobHashEvents($type: String!, $after: String) {
+    events(filter: { type: $type }, first: 50, after: $after) {
+      pageInfo {
+        hasNextPage
+        endCursor
+      }
+      nodes {
+        sender {
+          address
+        }
+        timestamp
+        contents {
+          json
+        }
+      }
+    }
+  }
+`;
+
+type EventsQueryResult = {
+  events: {
+    pageInfo: { hasNextPage: boolean; endCursor: string | null };
+    nodes: Array<{
+      sender: { address: string } | null;
+      timestamp: string | null;
+      contents: { json: unknown } | null;
+    }>;
+  };
+};
+
 /**
  * Fetch every `HashRegistered` event for the given package from the Sui
- * network and return them as `HashEntry` records.
+ * network and return them as `HashEntry` records. Reads go through the Sui
+ * GraphQL API (`graphqlUrl`) since it is a free, unauthenticated read path
+ * that (unlike the deprecated public JSON-RPC endpoint) is still served.
  */
 export async function queryAllBlobHashes(
   packageId: string,
-  rpcUrl: string,
+  graphqlUrl: string,
+  network: "testnet" | "mainnet" = "testnet",
 ): Promise<HashEntry[]> {
-  const rpcClient = new SuiJsonRpcClient({
-    network: "testnet",
-    url: rpcUrl,
+  const graphqlClient = new SuiGraphQLClient({
+    url: graphqlUrl,
+    network,
   });
 
   const eventType = `${packageId}::${BLOB_HASH_MODULE}::HashRegistered`;
   const entries: HashEntry[] = [];
-  let cursor: { eventSeq: string; txDigest: string } | null = null;
+  let after: string | null | undefined;
   let hasNextPage = true;
 
   while (hasNextPage) {
-    const page = await rpcClient.queryEvents({
-      query: { MoveEventType: eventType },
-      cursor: cursor ?? undefined,
-      limit: 100,
-      order: "ascending",
+    const result = await graphqlClient.query<EventsQueryResult>({
+      query: EVENTS_QUERY,
+      variables: { type: eventType, after },
     });
 
-    for (const event of page.data) {
-      const parsedJson = "parsedJson" in event ? event.parsedJson : undefined;
-      const sender = "sender" in event ? (event.sender as string) : "";
-      const timestampMs =
-        "timestampMs" in event
-          ? (event.timestampMs as string | null | undefined)
-          : undefined;
+    if (result.errors?.length) {
+      throw new Error(result.errors.map((error) => error.message).join("; "));
+    }
 
-      const entry = parseHashEntry(parsedJson, sender, timestampMs);
+    const events = result.data?.events;
+
+    if (!events) {
+      break;
+    }
+
+    for (const event of events.nodes) {
+      const sender = event.sender?.address ?? "";
+      const timestampMs = event.timestamp
+        ? String(new Date(event.timestamp).getTime())
+        : null;
+
+      const entry = parseHashEntry(event.contents?.json, sender, timestampMs);
       if (entry) {
         entries.push(entry);
       }
     }
 
-    cursor = page.nextCursor as { eventSeq: string; txDigest: string } | null;
-    hasNextPage = page.hasNextPage;
+    after = events.pageInfo.endCursor;
+    hasNextPage = events.pageInfo.hasNextPage;
   }
 
   return entries;

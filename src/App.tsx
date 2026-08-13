@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { ChangeEvent, DragEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { SuiJsonRpcClient } from "@mysten/sui/jsonRpc";
 import { Transaction } from "@mysten/sui/transactions";
 import { isValidSuiAddress, normalizeSuiAddress } from "@mysten/sui/utils";
 import {
@@ -58,6 +57,7 @@ import {
   encryptWithSeal,
   hexStringToBytes,
 } from "./seal";
+import { queryDeletedWalrusBlobTransactions } from "./deletedBlobHistory";
 import { sha256Hex } from "./fileHash";
 import {
   buildRegisterHashTransaction,
@@ -121,51 +121,29 @@ type FileActionFeedback = {
   message: string;
 };
 
-type DeletedHistoryArgument =
-  | "GasCoin"
-  | { Input: number }
-  | { Result: number }
-  | { NestedResult: [number, number] };
-
-type DeletedHistoryTransaction = {
-  digest: string;
-  timestampMs?: string | null;
-  transaction?: {
-    data?: {
-      transaction?: {
-        kind?: string;
-        inputs?: Array<{ objectId?: string; type?: string }>;
-        transactions?: Array<{
-          MoveCall?: {
-            arguments?: DeletedHistoryArgument[];
-            function: string;
-            module: string;
-          };
-        }>;
-      };
-    };
-  };
-};
-
 const isConfigured = Boolean(
   import.meta.env.VITE_ENOKI_API_KEY && import.meta.env.VITE_GOOGLE_CLIENT_ID,
 );
 
 const walrusPublisherUrl = getWalrusPublisherUrl();
 const maxUploadBytes = getMaxPublicUploadBytes();
-const sealPolicyPackageId = import.meta.env.VITE_SEAL_POLICY_PACKAGE_ID as
-  | string
-  | undefined;
+// Published `walrus_vault_policy` package IDs (Sui testnet). Hardcoded so a
+// working deployment doesn't require env configuration beyond the Enoki/
+// Google credentials in .env.
+const sealPolicyPackageId =
+  "0xecd756e500f8291a9dc41e148033e0775f1d47de9ce136e9aa089968e89a06c2";
 const isSealConfigured = Boolean(sealPolicyPackageId);
-// Hash registry lives in the upgraded package (VITE_HASH_REGISTRY_PACKAGE_ID).
-// Falls back to sealPolicyPackageId only when both modules are co-deployed.
-const hashRegistryPackageId = (import.meta.env.VITE_HASH_REGISTRY_PACKAGE_ID ??
-  sealPolicyPackageId) as string | undefined;
+// Hash registry lives in the same published package.
+const hashRegistryPackageId =
+  "0xfe9d233c5988d3cfe9421c460c50206b67b6e92f2c0ec3e71f6930e9e7e1c088";
 const isHashRegistryConfigured = Boolean(hashRegistryPackageId);
 const SEAL_POLICY_MODULE_NAME = "whitelist";
 const MYSELF_GROUP_NAME = "Myself";
-const JSON_RPC_URLS = {
-  testnet: "https://fullnode.testnet.sui.io:443",
+// Public fullnode JSON-RPC has been deprecated; free (unauthenticated) reads
+// that the gRPC core API doesn't cover (event queries, sender transaction
+// history) go through the Sui GraphQL API instead.
+const GRAPHQL_URLS = {
+  testnet: "https://graphql.testnet.sui.io/graphql",
 } as const;
 
 type WorkspaceSection =
@@ -275,6 +253,7 @@ function App() {
   >([]);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const copyResetTimeoutRef = useRef<number | null>(null);
+  const myselfEnsuredForAddressRef = useRef<string | null>(null);
   const [verifyFile, setVerifyFile] = useState<File | null>(null);
   const [isVerifying, setIsVerifying] = useState(false);
   const [verifyResult, setVerifyResult] = useState<"match" | "no-match" | null>(
@@ -304,16 +283,6 @@ function App() {
   );
 
   const walrusClient = useMemo(() => getWalrusClient(client), [client]);
-  const historyClient = useMemo(() => {
-    const network = currentNetwork as keyof typeof JSON_RPC_URLS;
-    const url = JSON_RPC_URLS[network];
-
-    if (!url) {
-      return null;
-    }
-
-    return new SuiJsonRpcClient({ network, url });
-  }, [currentNetwork]);
 
   const googleWallet = useMemo(
     () => wallets.filter(isEnokiWallet).find(isGoogleWallet) ?? null,
@@ -548,12 +517,12 @@ function App() {
   useEffect(() => {
     if (account || !isHashRegistryConfigured || !hashRegistryPackageId) return;
 
-    const rpcUrl =
-      JSON_RPC_URLS[currentNetwork as keyof typeof JSON_RPC_URLS] ??
-      JSON_RPC_URLS.testnet;
+    const graphqlUrl =
+      GRAPHQL_URLS[currentNetwork as keyof typeof GRAPHQL_URLS] ??
+      GRAPHQL_URLS.testnet;
     setIsLoadingRegistry(true);
     setRegistryError(null);
-    queryAllBlobHashes(hashRegistryPackageId, rpcUrl)
+    queryAllBlobHashes(hashRegistryPackageId, graphqlUrl)
       .then((entries) => {
         setRegistryEntries([...entries].reverse());
       })
@@ -751,9 +720,9 @@ function App() {
   }
 
   async function createWhitelist(name: string) {
-    if (!historyClient || !sealPolicyPackageId) {
+    if (!sealPolicyPackageId) {
       throw new Error(
-        "Seal allowlist is not configured. Publish the Move package and set VITE_SEAL_POLICY_PACKAGE_ID.",
+        "Seal allowlist is not configured. Publish the Move package and set sealPolicyPackageId in App.tsx.",
       );
     }
 
@@ -784,18 +753,20 @@ function App() {
       );
     }
 
-    const txBlock = await historyClient.waitForTransaction({
+    const txResult = await client.waitForTransaction({
       digest,
-      options: {
-        showObjectChanges: true,
-      },
+      include: { effects: true, objectTypes: true },
       timeout: 30_000,
-      pollInterval: 1_500,
+      pollSchedule: [0, 1_500],
     });
+    const txBlock =
+      txResult.$kind === "Transaction"
+        ? txResult.Transaction
+        : txResult.FailedTransaction;
 
     console.log("[whitelist] create:confirmed", {
       digest,
-      objectChanges: txBlock.objectChanges ?? [],
+      changedObjects: txBlock.effects?.changedObjects ?? [],
     });
 
     const created = extractWhitelistCreation(txBlock, sealPolicyPackageId);
@@ -846,7 +817,7 @@ function App() {
       setCreateWhitelistFeedback({
         kind: "error",
         message:
-          "Set VITE_SEAL_POLICY_PACKAGE_ID after publishing the whitelist package before creating a list.",
+          "Set sealPolicyPackageId in App.tsx after publishing the whitelist package before creating a list.",
       });
       return;
     }
@@ -1021,6 +992,31 @@ function App() {
     return updated;
   }
 
+  // Ensure every connected wallet has a "Myself" group, so it's visible in
+  // Lists right away instead of only appearing after the first encrypted
+  // upload that falls back to creating one.
+  useEffect(() => {
+    if (!account || !isSealConfigured || !whitelistsQuery.isSuccess) {
+      return;
+    }
+
+    if (myselfEnsuredForAddressRef.current === account.address) {
+      return;
+    }
+
+    if ((whitelistsQuery.data ?? []).some((w) => w.isMyselfGroup)) {
+      myselfEnsuredForAddressRef.current = account.address;
+      return;
+    }
+
+    myselfEnsuredForAddressRef.current = account.address;
+    void getOrCreateMyselfWhitelist().catch((error) => {
+      console.error("[whitelist] myself-group:auto-create-failed", error);
+      // Allow a retry on the next render that satisfies the conditions above.
+      myselfEnsuredForAddressRef.current = null;
+    });
+  }, [account, whitelistsQuery.isSuccess, whitelistsQuery.data]);
+
   async function handleWalrusUpload() {
     if (!account || !uploadFile) {
       return;
@@ -1028,14 +1024,7 @@ function App() {
 
     if (effectiveUploadEncrypt && !sealPolicyPackageId) {
       setUploadError(
-        "Set VITE_SEAL_POLICY_PACKAGE_ID after publishing the whitelist package before uploading encrypted files.",
-      );
-      return;
-    }
-
-    if (effectiveUploadEncrypt && !historyClient) {
-      setUploadError(
-        "Could not create the whitelist policy client for this network.",
+        "Set sealPolicyPackageId in App.tsx after publishing the whitelist package before uploading encrypted files.",
       );
       return;
     }
@@ -1061,7 +1050,7 @@ function App() {
     setUploadFeedback(null);
 
     try {
-      const sealClient = historyClient ?? client;
+      const sealClient = client;
       const plainBytes = new Uint8Array(await uploadFile.arrayBuffer());
 
       // Compute SHA-256 of the plaintext before encryption so external
@@ -1281,14 +1270,14 @@ function App() {
 
     if (!hashRegistryPackageId) {
       setVerifyError(
-        "Set VITE_HASH_REGISTRY_PACKAGE_ID (or VITE_SEAL_POLICY_PACKAGE_ID if co-deployed) so the verifier knows which on-chain registry to query.",
+        "Set hashRegistryPackageId in App.tsx so the verifier knows which on-chain registry to query.",
       );
       return;
     }
 
-    const rpcUrl =
-      JSON_RPC_URLS[currentNetwork as keyof typeof JSON_RPC_URLS] ??
-      JSON_RPC_URLS.testnet;
+    const graphqlUrl =
+      GRAPHQL_URLS[currentNetwork as keyof typeof GRAPHQL_URLS] ??
+      GRAPHQL_URLS.testnet;
 
     setIsVerifying(true);
     setVerifyResult(null);
@@ -1303,7 +1292,10 @@ function App() {
         sha256: hash,
       });
 
-      const entries = await queryAllBlobHashes(hashRegistryPackageId, rpcUrl);
+      const entries = await queryAllBlobHashes(
+        hashRegistryPackageId,
+        graphqlUrl,
+      );
       console.log("[verify] fetched on-chain entries", {
         count: entries.length,
       });
@@ -1668,7 +1660,7 @@ function App() {
         packageId,
       });
       const txBytes = await buildTransactionKindBytes(
-        historyClient ?? client,
+        client,
         approvalTransaction,
       );
 
@@ -1683,7 +1675,7 @@ function App() {
         dAppKit,
         encryptedBytes,
         packageId,
-        suiClient: historyClient ?? client,
+        suiClient: client,
         txBytes,
       });
       const plainArrayBuffer = toArrayBuffer(decryptedBytes);
@@ -1760,7 +1752,7 @@ function App() {
         [sharedFile.objectId]: {
           kind: "error",
           message:
-            "Missing Seal package ID for this shared file. Add VITE_SEAL_POLICY_PACKAGE_ID.",
+            "Missing Seal package ID for this shared file. Set sealPolicyPackageId in App.tsx.",
         },
       }));
       return;
@@ -1789,7 +1781,7 @@ function App() {
         packageId,
       });
       const txBytes = await buildTransactionKindBytes(
-        historyClient ?? client,
+        client,
         approvalTransaction,
       );
 
@@ -1798,7 +1790,7 @@ function App() {
         dAppKit,
         encryptedBytes,
         packageId,
-        suiClient: historyClient ?? client,
+        suiClient: client,
         txBytes,
       });
       const plainArrayBuffer = toArrayBuffer(decryptedBytes);
@@ -1829,7 +1821,7 @@ function App() {
 
     if (!sealPolicyPackageId) {
       setSharedAccessError(
-        "Set VITE_SEAL_POLICY_PACKAGE_ID before opening a shared encrypted file.",
+        "Set sealPolicyPackageId in App.tsx before opening a shared encrypted file.",
       );
       return;
     }
@@ -1873,7 +1865,7 @@ function App() {
         packageId: sealPolicyPackageId,
       });
       const txBytes = await buildTransactionKindBytes(
-        historyClient ?? client,
+        client,
         approvalTransaction,
       );
 
@@ -1888,7 +1880,7 @@ function App() {
         dAppKit,
         encryptedBytes,
         packageId: sealPolicyPackageId,
-        suiClient: historyClient ?? client,
+        suiClient: client,
         txBytes,
       });
       const plainArrayBuffer = toArrayBuffer(decryptedBytes);
@@ -2032,8 +2024,9 @@ function App() {
       );
 
       if (action === "add") {
+        const updatedWhitelist = { ...whitelist, members: nextMembers };
         for (const policy of assignedFolders) {
-          shareFolderWithTeamMembers(policy.folderPath, whitelist);
+          shareFolderWithTeamMembers(policy.folderPath, updatedWhitelist);
         }
       } else {
         for (const policy of assignedFolders) {
@@ -2226,39 +2219,38 @@ function App() {
 
   const deletedFilesQuery = useQuery({
     queryKey: ["deleted-files", currentNetwork, account?.address],
-    enabled: Boolean(account && historyClient),
+    enabled: Boolean(account),
     queryFn: async (): Promise<DeletedBlobRecord[]> => {
-      if (!account || !historyClient) {
+      if (!account) {
         return [];
       }
 
-      const response = await historyClient.queryTransactionBlocks({
-        filter: { FromAddress: account.address },
-        limit: 100,
-        options: { showInput: true },
-        order: "descending",
-      });
+      const graphqlUrl =
+        GRAPHQL_URLS[currentNetwork as keyof typeof GRAPHQL_URLS] ??
+        GRAPHQL_URLS.testnet;
+      const deletions = await queryDeletedWalrusBlobTransactions(
+        account.address,
+        graphqlUrl,
+      );
 
       return mergeDeletedBlobRecords(
         Array.from(
           new Map(
-            (response.data as DeletedHistoryTransaction[]).flatMap((tx) =>
-              extractDeletedBlobObjectIds(tx).map((objectId) => [
-                objectId,
-                {
-                  blobId: null,
-                  contentType: null,
-                  deletable: true,
-                  digest: tx.digest,
-                  fileName: null,
-                  objectId,
-                  size: null,
-                  storedUntilEpoch: null,
-                  timestampMs: tx.timestampMs ?? null,
-                  uploadedAt: null,
-                } satisfies DeletedBlobRecord,
-              ]),
-            ),
+            deletions.map((deletion) => [
+              deletion.objectId,
+              {
+                blobId: null,
+                contentType: null,
+                deletable: true,
+                digest: deletion.digest,
+                fileName: null,
+                objectId: deletion.objectId,
+                size: null,
+                storedUntilEpoch: null,
+                timestampMs: deletion.timestampMs,
+                uploadedAt: null,
+              } satisfies DeletedBlobRecord,
+            ]),
           ).values(),
         ),
         listLocalDeletedWalrusFiles(currentNetwork, account.address),
@@ -3177,9 +3169,9 @@ function App() {
 
                       {!isSealConfigured ? (
                         <p className="feedback-error">
-                          Add <code>VITE_SEAL_POLICY_PACKAGE_ID</code> after
-                          publishing the whitelist package to create and manage
-                          lists.
+                          Set <code>sealPolicyPackageId</code> in{" "}
+                          <code>App.tsx</code> after publishing the whitelist
+                          package to create and manage lists.
                         </p>
                       ) : null}
                     </div>
@@ -3804,9 +3796,10 @@ function App() {
 
                                 {effectiveUploadEncrypt && !isSealConfigured ? (
                                   <p className="feedback-error">
-                                    Add <code>VITE_SEAL_POLICY_PACKAGE_ID</code>{" "}
-                                    after publishing the whitelist package to
-                                    enable encrypted uploads.
+                                    Set <code>sealPolicyPackageId</code> in{" "}
+                                    <code>App.tsx</code> after publishing the
+                                    whitelist package to enable encrypted
+                                    uploads.
                                   </p>
                                 ) : null}
 
@@ -4080,6 +4073,17 @@ function App() {
                             </h2>
                           </div>
                           <div className="bucket-header-actions">
+                            {sharedCurrentPath === selectedSharedRootPath ? (
+                              <button
+                                className="btn btn-outline btn-sm"
+                                onClick={() => {
+                                  setSelectedSharedFolderId(null);
+                                }}
+                                type="button"
+                              >
+                                Back to shared folders
+                              </button>
+                            ) : null}
                             <span className="folder-policy-chip folder-policy-chip-inherited">
                               {selectedSharedFolder.teamName}
                             </span>
@@ -4108,31 +4112,6 @@ function App() {
 
                         {selectedSharedFolder ? (
                           <>
-                            {sharedCurrentPath === selectedSharedRootPath ? (
-                              <button
-                                className="bucket-row bucket-folder-row"
-                                onClick={() => {
-                                  setSelectedSharedFolderId(null);
-                                }}
-                                type="button"
-                              >
-                                <span className="bucket-name">
-                                  <span
-                                    className="bucket-item-icon"
-                                    aria-hidden="true"
-                                  >
-                                    📂
-                                  </span>
-                                  ../ shared folders
-                                </span>
-                                <span className="meta-chip meta-chip-folder">
-                                  folder
-                                </span>
-                                <span className="hint-text">back</span>
-                                <span />
-                              </button>
-                            ) : null}
-
                             {sharedCurrentPath !== selectedSharedRootPath ? (
                               <button
                                 className="bucket-row bucket-folder-row"
@@ -5088,53 +5067,6 @@ function resolveFolderAccessPolicy(
   );
 }
 
-function extractDeletedBlobObjectIds(
-  transaction: DeletedHistoryTransaction,
-): string[] {
-  const programmable = transaction.transaction?.data?.transaction;
-
-  if (
-    !programmable ||
-    programmable.kind !== "ProgrammableTransaction" ||
-    !programmable.transactions ||
-    !programmable.inputs
-  ) {
-    return [];
-  }
-
-  const objectIds = new Set<string>();
-
-  for (const command of programmable.transactions) {
-    const moveCall = command.MoveCall;
-
-    if (!moveCall) {
-      continue;
-    }
-
-    if (moveCall.module !== "system" || moveCall.function !== "delete_blob") {
-      continue;
-    }
-
-    const blobArgument = moveCall.arguments?.[1];
-
-    if (
-      !blobArgument ||
-      typeof blobArgument === "string" ||
-      !("Input" in blobArgument)
-    ) {
-      continue;
-    }
-
-    const input = programmable.inputs[blobArgument.Input];
-
-    if (input?.type === "object" && input.objectId) {
-      objectIds.add(input.objectId);
-    }
-  }
-
-  return Array.from(objectIds);
-}
-
 function mergeDeletedBlobRecords(
   chainRecords: DeletedBlobRecord[],
   snapshotRecords: DeletedBlobRecord[],
@@ -5183,26 +5115,27 @@ function getTransactionDigest(result: {
 
 function extractWhitelistCreation(
   transactionBlock: {
-    objectChanges?: Array<{
-      objectId?: string;
-      objectType?: string;
-      type: string;
-    }> | null;
+    effects?: {
+      changedObjects: Array<{ objectId: string; idOperation: string }>;
+    };
+    objectTypes?: Record<string, string>;
   },
   packageId: string,
 ) {
-  const objectChanges = transactionBlock.objectChanges ?? [];
-  const whitelistId = objectChanges.find(
-    (change) =>
-      change.type === "created" &&
-      change.objectType ===
-        `${packageId}::${SEAL_POLICY_MODULE_NAME}::Whitelist`,
-  )?.objectId;
-  const capId = objectChanges.find(
-    (change) =>
-      change.type === "created" &&
-      change.objectType === `${packageId}::${SEAL_POLICY_MODULE_NAME}::Cap`,
-  )?.objectId;
+  const createdObjectIds = (transactionBlock.effects?.changedObjects ?? [])
+    .filter((change) => change.idOperation === "Created")
+    .map((change) => change.objectId);
+  const objectTypes = transactionBlock.objectTypes ?? {};
+
+  const whitelistId = createdObjectIds.find(
+    (objectId) =>
+      objectTypes[objectId] ===
+      `${packageId}::${SEAL_POLICY_MODULE_NAME}::Whitelist`,
+  );
+  const capId = createdObjectIds.find(
+    (objectId) =>
+      objectTypes[objectId] === `${packageId}::${SEAL_POLICY_MODULE_NAME}::Cap`,
+  );
 
   if (!whitelistId || !capId) {
     throw new Error(
