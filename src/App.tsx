@@ -33,7 +33,11 @@ import {
   listLocalSharedFolders,
   listLocalSharedWalrusFiles,
   listLocalWalrusWhitelists,
+  listSeenSharedFileIds,
+  listSeenSharedFolderIds,
   markLocalWalrusFileDeleted,
+  markSharedFileIdsSeen,
+  markSharedFolderIdsSeen,
   patchLocalWalrusWhitelist,
   removeLocalSharedFolder,
   removeLocalSharedWalrusFiles,
@@ -1551,6 +1555,7 @@ function App() {
     }
   }
 
+
   function shareUploadedFileWithTeamMembers(
     file: Pick<
       LocalWalrusFileMetadata,
@@ -2349,6 +2354,48 @@ function App() {
 
     return Array.from(recordsByFolder.values());
   }, [sharedFolderRecords]);
+  const seenSharedFolderIds = account
+    ? new Set(listSeenSharedFolderIds(currentNetwork, account.address))
+    : new Set<string>();
+  const unseenSharedFolderItems = sharedFolderItems.filter(
+    (item) => !seenSharedFolderIds.has(item.id),
+  );
+  const unseenSharedFolderCount = unseenSharedFolderItems.length;
+  const seenSharedFileIds = account
+    ? new Set(listSeenSharedFileIds(currentNetwork, account.address))
+    : new Set<string>();
+  const unseenSharedFileItems = sharedFileAccessRecords.filter(
+    (file) => !seenSharedFileIds.has(file.objectId),
+  );
+  const unseenSharedFileCount = unseenSharedFileItems.length;
+  const totalUnseenSharedCount =
+    unseenSharedFolderCount + unseenSharedFileCount;
+  const hasUnseenSharedItems = totalUnseenSharedCount > 0;
+  const unseenSharedItemsLabel = [
+    unseenSharedFolderCount > 0
+      ? `${unseenSharedFolderCount} new ${unseenSharedFolderCount === 1 ? "folder" : "folders"}`
+      : null,
+    unseenSharedFileCount > 0
+      ? `${unseenSharedFileCount} new ${unseenSharedFileCount === 1 ? "file" : "files"}`
+      : null,
+  ]
+    .filter((part): part is string => part !== null)
+    .join(" and ");
+
+  // A top-level shared folder should read as "New" if the share itself is
+  // new, or if it contains any file (at any depth) that hasn't been seen.
+  function sharedFolderItemHasUnseenFile(item: {
+    ownerAddress: string;
+    teamId: string;
+  }) {
+    return sharedFileAccessRecords.some(
+      (file) =>
+        file.teamId === item.teamId &&
+        normalizeSuiAddress(file.teamOwner) === item.ownerAddress &&
+        !seenSharedFileIds.has(file.objectId),
+    );
+  }
+
   const selectedSharedFolder =
     sharedFolderItems.find((item) => item.id === selectedSharedFolderId) ??
     null;
@@ -2407,6 +2454,22 @@ function App() {
   const sharedCurrentFolders = selectedSharedFolder
     ? getChildFolders(sharedCurrentPath, sharedOwnerFolderPaths)
     : [];
+
+  // A folder should read as "New" if it directly is new, or if any file
+  // nested anywhere inside it (including in subfolders) hasn't been seen
+  // yet — otherwise a new file dropped into an already-opened folder would
+  // be invisible unless you happened to re-browse into it.
+  function subfolderHasUnseenFile(folderPath: string) {
+    return sharedFolderAccessRecords.some((file) => {
+      const fileFolderPath = normalizeFolderPath(file.folderPath ?? "/");
+
+      return (
+        isSameOrChildFolder(fileFolderPath, folderPath) &&
+        !seenSharedFileIds.has(file.objectId)
+      );
+    });
+  }
+
   const sharedRoomFiles = selectedSharedFolder
     ? sharedFolderAccessRecords
         .filter((file) => {
@@ -2423,6 +2486,28 @@ function App() {
           ),
         )
     : [];
+  const sharedRoomFileIdsKey = sharedRoomFiles
+    .map((file) => file.objectId)
+    .join(",");
+
+  // Viewing a shared folder's contents counts as "checking" the files in it,
+  // so their "New" tag clears without requiring a separate click per file.
+  useEffect(() => {
+    if (!account || !selectedSharedFolderId || !sharedRoomFileIdsKey) {
+      return;
+    }
+
+    markSharedFileIdsSeen(
+      currentNetwork,
+      account.address,
+      sharedRoomFileIdsKey.split(","),
+    );
+  }, [
+    account,
+    currentNetwork,
+    selectedSharedFolderId,
+    sharedRoomFileIdsKey,
+  ]);
   const sharedBreadcrumbs = useMemo(() => {
     if (!selectedSharedFolder) {
       return [] as Array<{ label: string; path: string }>;
@@ -3066,7 +3151,17 @@ function App() {
                   onClick={() => setWorkspaceSection("rooms")}
                   type="button"
                 >
-                  <span className="workspace-nav-item-label">Data Room</span>
+                  <span className="workspace-nav-item-label">
+                    Data Room
+                    {hasUnseenSharedItems ? (
+                      <span
+                        className="nav-notification-badge"
+                        title={`${unseenSharedItemsLabel} shared with you`}
+                      >
+                        {totalUnseenSharedCount}
+                      </span>
+                    ) : null}
+                  </span>
                   <span className="workspace-nav-item-meta">
                     {folderPolicyCount}
                   </span>
@@ -3400,6 +3495,14 @@ function App() {
                       type="button"
                     >
                       Shared
+                      {hasUnseenSharedItems ? (
+                        <span
+                          className="nav-notification-badge"
+                          title={`${unseenSharedItemsLabel} shared with you`}
+                        >
+                          {totalUnseenSharedCount}
+                        </span>
+                      ) : null}
                     </button>
                   </div>
 
@@ -4102,6 +4205,29 @@ function App() {
                         </div>
                       )}
 
+                      {!selectedSharedFolder && hasUnseenSharedItems ? (
+                        <div className="shared-new-banner">
+                          <span
+                            className="shared-new-banner-icon"
+                            aria-hidden="true"
+                          >
+                            🔔
+                          </span>
+                          <div className="shared-new-banner-text">
+                            <strong>
+                              {totalUnseenSharedCount} new{" "}
+                              {totalUnseenSharedCount === 1 ? "item" : "items"}{" "}
+                              to check
+                            </strong>
+                            <span className="shared-new-banner-detail">
+                              {unseenSharedItemsLabel} since your last visit —
+                              look for the{" "}
+                              <span className="chip-new">New</span> tag below.
+                            </span>
+                          </div>
+                        </div>
+                      ) : null}
+
                       <div className="bucket-table">
                         <div className="bucket-table-head">
                           <span>Name</span>
@@ -4164,6 +4290,9 @@ function App() {
                                     📁
                                   </span>
                                   {getFolderName(folderPath)}/
+                                  {subfolderHasUnseenFile(folderPath) ? (
+                                    <span className="chip-new">New</span>
+                                  ) : null}
                                 </span>
                                 <span className="meta-chip meta-chip-folder">
                                   folder
@@ -4186,6 +4315,9 @@ function App() {
                                     )}
                                   </span>
                                   {file.fileName ?? file.objectId}
+                                  {!seenSharedFileIds.has(file.objectId) ? (
+                                    <span className="chip-new">New</span>
+                                  ) : null}
                                 </span>
                                 <span className="meta-chip">
                                   {file.contentType ?? "file"}
@@ -4229,6 +4361,13 @@ function App() {
                                   setSharedFolderPath(
                                     normalizeFolderPath(item.folderPath),
                                   );
+                                  if (account) {
+                                    markSharedFolderIdsSeen(
+                                      currentNetwork,
+                                      account.address,
+                                      [item.id],
+                                    );
+                                  }
                                 }}
                                 type="button"
                               >
@@ -4241,6 +4380,10 @@ function App() {
                                   </span>
                                   {shortenAddress(item.ownerAddress)}/
                                   {getFolderName(item.folderPath)}
+                                  {!seenSharedFolderIds.has(item.id) ||
+                                  sharedFolderItemHasUnseenFile(item) ? (
+                                    <span className="chip-new">New</span>
+                                  ) : null}
                                 </span>
                                 <span className="meta-chip meta-chip-folder">
                                   folder

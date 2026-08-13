@@ -116,6 +116,8 @@ To share an encrypted file, the owner:
 
 The recipient can then use the **Shared Access** section to decrypt the file if their connected wallet is currently allowed.
 
+Team-folder sharing (Data Room → Shared tab) is different: when a folder is assigned to a team, or a new member is added to a team with folders assigned, the app writes a local "shared with you" record for each member directly to `localStorage` — no out-of-band step needed, but only if the member later opens the app **in the same browser** (there's still no backend, so this record never leaves the browser it was written in). A small notification dot appears on the **Data Room** nav item and the **Shared** tab whenever there are shared folders the current wallet hasn't opened yet; opening the Shared tab marks them as seen (tracked per-wallet in `localStorage`, independent of the shared-folder records themselves).
+
 ### Document verification
 
 The **Verify** section allows anyone — including unauthenticated visitors — to check whether a file they hold matches a document registered on-chain:

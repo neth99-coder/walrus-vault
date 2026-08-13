@@ -812,3 +812,100 @@ export function removeLocalSharedWalrusFile(
     whitelists: current.whitelists,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Seen shared folders / files — tracks which shared items (by id) this
+// wallet has already opened, so the UI can point out exactly what's new
+// since the last visit instead of a generic "you have shares" notice.
+// Stored under their own keys rather than the main per-wallet state above so
+// they never need to be threaded through every other read/write of that
+// state.
+// ---------------------------------------------------------------------------
+
+function createSeenIdsStorageKey(
+  storagePrefix: string,
+  network: string,
+  address: string,
+) {
+  return `${storagePrefix}:${network}:${address.toLowerCase()}`;
+}
+
+function readSeenIds(
+  storagePrefix: string,
+  network: string,
+  address: string,
+): string[] {
+  if (!canUseLocalStorage()) {
+    return [];
+  }
+
+  try {
+    const rawValue = window.localStorage.getItem(
+      createSeenIdsStorageKey(storagePrefix, network, address),
+    );
+
+    if (!rawValue) {
+      return [];
+    }
+
+    const parsed = JSON.parse(rawValue) as unknown;
+
+    return Array.isArray(parsed)
+      ? parsed.filter((value): value is string => typeof value === "string")
+      : [];
+  } catch {
+    return [];
+  }
+}
+
+function markSeenIds(
+  storagePrefix: string,
+  network: string,
+  address: string,
+  ids: string[],
+) {
+  if (!canUseLocalStorage() || ids.length === 0) {
+    return;
+  }
+
+  const seen = new Set(readSeenIds(storagePrefix, network, address));
+  for (const id of ids) {
+    seen.add(id);
+  }
+
+  window.localStorage.setItem(
+    createSeenIdsStorageKey(storagePrefix, network, address),
+    JSON.stringify(Array.from(seen)),
+  );
+}
+
+const SEEN_SHARED_FOLDERS_STORAGE_KEY_PREFIX = "walrus-seen-shared-folders";
+
+// Shared-folder ids are `${teamOwner}:${folderPath}` (see `sharedFolderItems`
+// in App.tsx).
+export function listSeenSharedFolderIds(network: string, address: string) {
+  return readSeenIds(SEEN_SHARED_FOLDERS_STORAGE_KEY_PREFIX, network, address);
+}
+
+export function markSharedFolderIdsSeen(
+  network: string,
+  address: string,
+  ids: string[],
+) {
+  markSeenIds(SEEN_SHARED_FOLDERS_STORAGE_KEY_PREFIX, network, address, ids);
+}
+
+const SEEN_SHARED_FILES_STORAGE_KEY_PREFIX = "walrus-seen-shared-files";
+
+// Shared-file ids are Walrus blob object ids.
+export function listSeenSharedFileIds(network: string, address: string) {
+  return readSeenIds(SEEN_SHARED_FILES_STORAGE_KEY_PREFIX, network, address);
+}
+
+export function markSharedFileIdsSeen(
+  network: string,
+  address: string,
+  ids: string[],
+) {
+  markSeenIds(SEEN_SHARED_FILES_STORAGE_KEY_PREFIX, network, address, ids);
+}
