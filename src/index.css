@@ -1,20 +1,71 @@
-@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Space+Grotesk:wght@400;500;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Raleway:ital,wght@0,100;0,200;0,300;0,400;0,500;0,600;0,700;0,800;0,900;1,400;1,700&family=Karla:ital,wght@0,200;0,300;0,400;0,500;0,600;0,700;0,800;1,400;1,700&display=swap");
 
 :root {
-  --background: #f6f7f9;
-  --background-2: #ffffff;
-  --foreground: #111827;
-  --muted: #4b5563;
-  --muted-soft: #6b7280;
-  --border: #e5e7eb;
-  --accent-strong: #1f2937;
-  --accent-warm: #d1d5db;
-  --mono: "IBM Plex Mono", "SFMono-Regular", monospace;
-  --sans: "Space Grotesk", "Trebuchet MS", sans-serif;
+  /* ─── Trade3 brand scales ─────────────────────────────── */
+  --violet-50: #f0eafa;
+  --violet-100: #d8c4f3;
+  --violet-200: #b898e9;
+  --violet-300: #8f61d9;
+  --violet-400: #6a35c5;
+  --violet-500: #3b128d;
+  --violet-600: #310e7a;
+  --violet-700: #260a62;
+  --violet-800: #1a0748;
+  --violet-900: #0f0430;
 
-  color: var(--foreground);
-  background: linear-gradient(180deg, #fbfbfc, var(--background));
-  font-family: var(--sans);
+  --orange-50: #fff3ee;
+  --orange-100: #ffd9cc;
+  --orange-200: #ffb49f;
+  --orange-300: #ff8b6b;
+  --orange-400: #fb6e4c;
+  --orange-500: #f75835;
+  --orange-600: #d43e1d;
+  --orange-700: #ae2d10;
+
+  --cream-50: #fffdfb;
+  --cream-100: #fdf5ef;
+  --cream-200: #fae9da;
+  --cream-300: #f5d7bf;
+
+  --navy-500: #060430;
+
+  /* ─── Semantic tokens (light theme) ───────────────────── */
+  --bg-primary: var(--cream-100);
+  --bg-secondary: #ffffff;
+  --bg-tertiary: var(--cream-200);
+  --bg-inverse: var(--navy-500);
+
+  --text-primary: var(--navy-500);
+  --text-secondary: #4a4870;
+  --text-tertiary: #8885aa;
+  --text-inverse: #ffffff;
+  --text-brand: var(--violet-500);
+  --text-accent: var(--orange-500);
+
+  --border-default: var(--cream-300);
+  --border-strong: var(--violet-200);
+
+  --brand-primary: var(--violet-500);
+  --brand-secondary: var(--orange-500);
+
+  --font-display: "Raleway", sans-serif;
+  --font-body: "Karla", sans-serif;
+
+  /* ─── Legacy aliases (referenced across App.css) ──────── */
+  --background: var(--bg-primary);
+  --background-2: var(--bg-secondary);
+  --foreground: var(--text-primary);
+  --muted: var(--text-secondary);
+  --muted-soft: var(--text-tertiary);
+  --border: var(--border-default);
+  --accent-strong: var(--violet-600);
+  --accent-warm: var(--orange-200);
+  --mono: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+  --sans: var(--font-body);
+
+  color: var(--text-primary);
+  background: var(--bg-primary);
+  font-family: var(--font-body);
   line-height: 1.5;
   font-weight: 400;
   font-synthesis: none;
@@ -35,7 +86,7 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  background: linear-gradient(180deg, #ffffff, var(--background));
+  background: var(--bg-primary);
 }
 
 button,
@@ -55,28 +106,34 @@ a {
 
 h1,
 h2,
-h3 {
-  color: var(--foreground);
+h3,
+h4 {
+  font-family: var(--font-display);
+  color: var(--text-primary);
   line-height: 1.05;
 }
 
 h1 {
   margin: 0 0 16px;
   font-size: clamp(2.8rem, 6vw, 5.1rem);
-  letter-spacing: -0.06em;
+  font-weight: 800;
+  letter-spacing: -0.04em;
 }
 
 h2 {
   font-size: clamp(1.5rem, 3vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
 }
 
 h3 {
   font-size: 1.1rem;
+  font-weight: 600;
 }
 
 code {
   font-family: var(--mono);
   padding: 0.15rem 0.45rem;
   border-radius: 999px;
-  background: #f3f4f6;
+  background: var(--bg-tertiary);
 }

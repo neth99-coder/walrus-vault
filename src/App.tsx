@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import type { ChangeEvent, DragEvent } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Transaction } from "@mysten/sui/transactions";
@@ -196,6 +202,14 @@ function App() {
   const currentWallet = useCurrentWallet();
   const dAppKit = useDAppKit();
   const wallets = useWallets();
+  const [theme, setTheme] = useState<"light" | "dark">(() => {
+    const stored = localStorage.getItem("theme");
+    return stored === "light" || stored === "dark" ? stored : "light";
+  });
+  useLayoutEffect(() => {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+  }, [theme]);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [isSigningIn, setIsSigningIn] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -2727,12 +2741,42 @@ function App() {
         className={`topnav${!account && isConfigured ? " topnav-landing" : ""}`}
       >
         <div className="topnav-brand">
-          <span className="brand-mark" aria-hidden="true">
-            ◈
-          </span>
-          <span className="brand-name">Walrus Vault</span>
+          <img
+            className="brand-logo"
+            src={
+              theme === "dark"
+                ? "/brand/trade3-logo-dark.svg"
+                : "/brand/trade3-logo-light.svg"
+            }
+            alt="Trade3"
+          />
+          <span className="brand-name">Data Room</span>
         </div>
         <div className="topnav-right">
+          <button
+            className="theme-toggle"
+            onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+            title={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            aria-label={theme === "dark" ? "Switch to light theme" : "Switch to dark theme"}
+            type="button"
+          >
+            {theme === "dark" ? (
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <path
+                  fill="currentColor"
+                  d="M12 3a9 9 0 1 0 9 9 7 7 0 0 1-9-9Z"
+                />
+              </svg>
+            ) : (
+              <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+                <circle cx="12" cy="12" r="4.5" fill="currentColor" />
+                <g stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                  <path d="M12 2.5v2.3M12 19.2v2.3M21.5 12h-2.3M4.8 12H2.5" />
+                  <path d="m18.4 5.6-1.6 1.6M7.2 16.8l-1.6 1.6M18.4 18.4l-1.6-1.6M7.2 7.2 5.6 5.6" />
+                </g>
+              </svg>
+            )}
+          </button>
           <span className="badge-network">{currentNetwork}</span>
           {account ? (
             <>
@@ -2784,18 +2828,14 @@ function App() {
             <div className="lp-hero-mesh" aria-hidden="true" />
             <div className="lp-hero-grid" aria-hidden="true" />
             <div className="lp-hero-content">
-              <div className="lp-hero-badge">
-                <span className="lp-hero-badge-dot" />
-                Built on Sui · Walrus Protocol
-              </div>
               <h1 className="lp-hero-title">
                 Secure.&nbsp;Verifiable.
                 <br />
                 Decentralised.
               </h1>
               <p className="lp-hero-sub">
-                Store files on&nbsp;Walrus, encrypt with&nbsp;Seal, prove
-                authenticity on&#8209;chain — no custodian, no trust required.
+                Secure encrypted document storage with attested provenance —
+                no custodian, no trust required.
               </p>
 
               {/* Login buttons */}
