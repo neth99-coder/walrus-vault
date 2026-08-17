@@ -50,10 +50,11 @@ import {
   saveLocalWalrusFile,
   type DeletedBlobRecord,
   type LocalFolderAccessPolicy,
+  type LocalSharedFolderRecord,
   type LocalSharedWalrusFileMetadata,
   type LocalWalrusFileMetadata,
   type LocalWalrusWhitelist,
-} from "./localWalrusMetadata";
+} from "./gristMetadata";
 import {
   buildTransactionKindBytes,
   createSealApprovalTransaction,
@@ -391,7 +392,7 @@ function App() {
       }
 
       const localMetadataByObjectId = new Map<string, LocalWalrusFileMetadata>(
-        listLocalWalrusFileMetadata(currentNetwork, account.address).map(
+        (await listLocalWalrusFileMetadata(currentNetwork, account.address)).map(
           (metadata) => [metadata.objectId, metadata],
         ),
       );
@@ -514,6 +515,66 @@ function App() {
       return rows
         .filter((row): row is WalrusBlobRecord => row !== null)
         .sort((left, right) => Number(BigInt(right.size) - BigInt(left.size)));
+    },
+  });
+
+  const filesMetadataQuery = useQuery({
+    queryKey: ["walrus-files-metadata", currentNetwork, account?.address],
+    enabled: Boolean(account),
+    queryFn: async (): Promise<LocalWalrusFileMetadata[]> => {
+      if (!account) {
+        return [];
+      }
+
+      return listLocalWalrusFileMetadata(currentNetwork, account.address);
+    },
+  });
+
+  const sharedFoldersQuery = useQuery({
+    queryKey: ["shared-folders", currentNetwork, account?.address],
+    enabled: Boolean(account),
+    queryFn: async (): Promise<LocalSharedFolderRecord[]> => {
+      if (!account) {
+        return [];
+      }
+
+      return listLocalSharedFolders(currentNetwork, account.address);
+    },
+  });
+
+  const sharedFilesQuery = useQuery({
+    queryKey: ["shared-files", currentNetwork, account?.address],
+    enabled: Boolean(account),
+    queryFn: async (): Promise<LocalSharedWalrusFileMetadata[]> => {
+      if (!account) {
+        return [];
+      }
+
+      return listLocalSharedWalrusFiles(currentNetwork, account.address);
+    },
+  });
+
+  const seenSharedFolderIdsQuery = useQuery({
+    queryKey: ["seen-shared-folder-ids", currentNetwork, account?.address],
+    enabled: Boolean(account),
+    queryFn: async (): Promise<string[]> => {
+      if (!account) {
+        return [];
+      }
+
+      return listSeenSharedFolderIds(currentNetwork, account.address);
+    },
+  });
+
+  const seenSharedFileIdsQuery = useQuery({
+    queryKey: ["seen-shared-file-ids", currentNetwork, account?.address],
+    enabled: Boolean(account),
+    queryFn: async (): Promise<string[]> => {
+      if (!account) {
+        return [];
+      }
+
+      return listSeenSharedFileIds(currentNetwork, account.address);
     },
   });
 
@@ -785,7 +846,7 @@ function App() {
       throw new Error("No connected account for whitelist creation.");
     }
 
-    saveLocalWalrusWhitelist(currentNetwork, account.address, {
+    await saveLocalWalrusWhitelist(currentNetwork, account.address, {
       capId: created.capId,
       createdAt: new Date().toISOString(),
       id: created.whitelistId,
@@ -893,14 +954,14 @@ function App() {
       return;
     }
 
-    saveLocalFolderAccessPolicy(currentNetwork, account.address, {
+    await saveLocalFolderAccessPolicy(currentNetwork, account.address, {
       folderPath: uploadFolderPath,
       updatedAt: new Date().toISOString(),
       whitelistId: selectedWhitelist.id,
       whitelistName: selectedWhitelist.name,
     });
 
-    shareFolderWithTeamMembers(uploadFolderPath, selectedWhitelist);
+    await shareFolderWithTeamMembers(uploadFolderPath, selectedWhitelist);
 
     setFolderPolicyFeedback({
       kind: "success",
@@ -947,7 +1008,7 @@ function App() {
       return;
     }
 
-    const savedPath = saveLocalFolder(
+    const savedPath = await saveLocalFolder(
       currentNetwork,
       account.address,
       folderPath,
@@ -972,18 +1033,17 @@ function App() {
     }
 
     const created = await createWhitelist(MYSELF_GROUP_NAME);
-    patchLocalWalrusWhitelist(
+    await patchLocalWalrusWhitelist(
       currentNetwork,
       account.address,
       created.whitelistId,
       { isMyselfGroup: true },
     );
 
-    // Read directly from localStorage — whitelistsQuery.data is a stale
-    // closure and won't reflect the refetch result until the next render.
-    const updated = listLocalWalrusWhitelists(
-      currentNetwork,
-      account.address,
+    // Read directly from Grist — whitelistsQuery.data is a stale closure and
+    // won't reflect the refetch result until the next render.
+    const updated = (
+      await listLocalWalrusWhitelists(currentNetwork, account.address)
     ).find((w) => w.id === created.whitelistId);
 
     // Fire in the background so the Lists panel refreshes in the UI.
@@ -1154,7 +1214,7 @@ function App() {
         const normalizedBlobId = normalizeBlobId(newlyCreatedBlob.blobId);
         const uploadedAt = new Date().toISOString();
 
-        saveLocalWalrusFile(
+        await saveLocalWalrusFile(
           currentNetwork,
           account.address,
           {
@@ -1176,9 +1236,10 @@ function App() {
             whitelistName: selectedWhitelist?.name ?? null,
           },
         );
+        await filesMetadataQuery.refetch();
 
         if (effectiveUploadEncrypt && selectedWhitelist) {
-          shareUploadedFileWithTeamMembers(
+          await shareUploadedFileWithTeamMembers(
             {
               blobId: normalizedBlobId,
               contentType: uploadFile.type || "application/octet-stream",
@@ -1444,13 +1505,15 @@ function App() {
     }
   }
 
+  // Sync lookups against the already-loaded react-query caches (not a fresh
+  // Grist fetch per call) — these run inline during row rendering.
   function getStoredLocalMetadata(objectId: string) {
     if (!account) {
       return null;
     }
 
     return (
-      listLocalWalrusFileMetadata(currentNetwork, account.address).find(
+      (filesMetadataQuery.data ?? []).find(
         (file) => file.objectId === objectId,
       ) ?? null
     );
@@ -1462,25 +1525,27 @@ function App() {
     }
 
     return (
-      listLocalWalrusWhitelists(currentNetwork, account.address).find(
+      (whitelistsQuery.data ?? []).find(
         (whitelist) => whitelist.id === whitelistId,
       ) ?? null
     );
   }
 
-  function shareFolderWithTeamMembers(
+  async function shareFolderWithTeamMembers(
     folderPath: string,
     team: LocalWalrusWhitelist,
-    sourceFiles: LocalWalrusFileMetadata[] = account
-      ? listLocalWalrusFileMetadata(currentNetwork, account.address)
-      : [],
+    sourceFiles?: LocalWalrusFileMetadata[],
   ) {
     if (!account) {
       return;
     }
 
+    const resolvedSourceFiles =
+      sourceFiles ??
+      (await listLocalWalrusFileMetadata(currentNetwork, account.address));
+
     const normalizedFolderPath = normalizeFolderPath(folderPath);
-    const matchingFiles = sourceFiles.filter((file) => {
+    const matchingFiles = resolvedSourceFiles.filter((file) => {
       const fileFolderPath = normalizeFolderPath(file.folderPath ?? "/");
 
       return isSameOrChildFolder(fileFolderPath, normalizedFolderPath);
@@ -1493,7 +1558,7 @@ function App() {
         continue;
       }
 
-      saveLocalSharedFolder(currentNetwork, normalizedMember, {
+      await saveLocalSharedFolder(currentNetwork, normalizedMember, {
         myWallet: normalizedMember,
         sharedFolder: normalizedFolderPath,
         teamId: team.id,
@@ -1503,7 +1568,7 @@ function App() {
       });
 
       for (const file of matchingFiles) {
-        saveLocalSharedWalrusFile(currentNetwork, normalizedMember, {
+        await saveLocalSharedWalrusFile(currentNetwork, normalizedMember, {
           blobId: file.blobId,
           contentType: file.contentType,
           fileName: file.fileName,
@@ -1524,7 +1589,7 @@ function App() {
     }
   }
 
-  function removeFolderAccessFromTeamMembers(
+  async function removeFolderAccessFromTeamMembers(
     folderPath: string,
     team: LocalWalrusWhitelist,
   ) {
@@ -1541,13 +1606,13 @@ function App() {
         continue;
       }
 
-      removeLocalSharedFolder(currentNetwork, normalizedMember, {
+      await removeLocalSharedFolder(currentNetwork, normalizedMember, {
         sharedFolder: normalizedFolderPath,
         teamId: team.id,
         teamOwner: account.address,
       });
 
-      removeLocalSharedWalrusFiles(currentNetwork, normalizedMember, {
+      await removeLocalSharedWalrusFiles(currentNetwork, normalizedMember, {
         sharedFolder: normalizedFolderPath,
         teamId: team.id,
         teamOwner: account.address,
@@ -1556,7 +1621,7 @@ function App() {
   }
 
 
-  function shareUploadedFileWithTeamMembers(
+  async function shareUploadedFileWithTeamMembers(
     file: Pick<
       LocalWalrusFileMetadata,
       | "blobId"
@@ -1585,7 +1650,7 @@ function App() {
         continue;
       }
 
-      saveLocalSharedWalrusFile(currentNetwork, normalizedMember, {
+      await saveLocalSharedWalrusFile(currentNetwork, normalizedMember, {
         blobId: file.blobId,
         contentType: file.contentType,
         fileName: file.fileName,
@@ -2020,9 +2085,12 @@ function App() {
           ? Array.from(new Set([...whitelist.members, normalizedAddress]))
           : whitelist.members.filter((value) => value !== normalizedAddress);
 
-      patchLocalWalrusWhitelist(currentNetwork, account.address, whitelist.id, {
-        members: nextMembers,
-      });
+      await patchLocalWalrusWhitelist(
+        currentNetwork,
+        account.address,
+        whitelist.id,
+        { members: nextMembers },
+      );
 
       const assignedFolders = folderPolicies.filter(
         (policy) => policy.whitelistId === whitelist.id,
@@ -2031,11 +2099,11 @@ function App() {
       if (action === "add") {
         const updatedWhitelist = { ...whitelist, members: nextMembers };
         for (const policy of assignedFolders) {
-          shareFolderWithTeamMembers(policy.folderPath, updatedWhitelist);
+          await shareFolderWithTeamMembers(policy.folderPath, updatedWhitelist);
         }
       } else {
         for (const policy of assignedFolders) {
-          removeFolderAccessFromTeamMembers(policy.folderPath, whitelist);
+          await removeFolderAccessFromTeamMembers(policy.folderPath, whitelist);
         }
       }
 
@@ -2150,7 +2218,8 @@ function App() {
 
       await signAndExecuteTransaction(transaction);
 
-      markLocalWalrusFileDeleted(currentNetwork, account.address, file);
+      await markLocalWalrusFileDeleted(currentNetwork, account.address, file);
+      await filesMetadataQuery.refetch();
       if (localMetadata?.whitelistId) {
         const deletedFolderPath = normalizeFolderPath(
           localMetadata.folderPath ?? "/",
@@ -2168,13 +2237,13 @@ function App() {
               continue;
             }
 
-            removeLocalSharedWalrusFile(currentNetwork, normalizedMember, {
+            await removeLocalSharedWalrusFile(currentNetwork, normalizedMember, {
               objectId: file.objectId,
               teamId: whitelist.id,
               teamOwner: account.address,
             });
 
-            removeLocalSharedWalrusFiles(currentNetwork, normalizedMember, {
+            await removeLocalSharedWalrusFiles(currentNetwork, normalizedMember, {
               sharedFolder: deletedFolderPath,
               teamId: whitelist.id,
               teamOwner: account.address,
@@ -2258,7 +2327,7 @@ function App() {
             ]),
           ).values(),
         ),
-        listLocalDeletedWalrusFiles(currentNetwork, account.address),
+        await listLocalDeletedWalrusFiles(currentNetwork, account.address),
       );
     },
   });
@@ -2267,9 +2336,7 @@ function App() {
   const whitelists = whitelistsQuery.data ?? [];
   const folderPolicies = folderPoliciesQuery.data ?? [];
   const storedFolders = foldersQuery.data ?? ["/"];
-  const localFileMetadata = account
-    ? listLocalWalrusFileMetadata(currentNetwork, account.address)
-    : [];
+  const localFileMetadata = filesMetadataQuery.data ?? [];
   const allDataRoomFolders = getAllDataRoomFolders(
     storedFolders,
     localFileMetadata,
@@ -2318,12 +2385,12 @@ function App() {
       (policy) => policy.folderPath === normalizeFolderPath(uploadFolderPath),
     ) ?? null;
   const isFolderPolicyLocked = Boolean(currentRoomPolicy);
-  const sharedFolderRecords = account
-    ? listLocalSharedFolders(currentNetwork, account.address)
-    : [];
-  const sharedFileAccessRecords = account
-    ? listLocalSharedWalrusFiles(currentNetwork, account.address)
-    : [];
+  const sharedFolderRecordsData = sharedFoldersQuery.data;
+  const sharedFolderRecords = useMemo(
+    () => sharedFolderRecordsData ?? [],
+    [sharedFolderRecordsData],
+  );
+  const sharedFileAccessRecords = sharedFilesQuery.data ?? [];
   const sharedFolderItems = useMemo(() => {
     const recordsByFolder = new Map<
       string,
@@ -2354,16 +2421,12 @@ function App() {
 
     return Array.from(recordsByFolder.values());
   }, [sharedFolderRecords]);
-  const seenSharedFolderIds = account
-    ? new Set(listSeenSharedFolderIds(currentNetwork, account.address))
-    : new Set<string>();
+  const seenSharedFolderIds = new Set(seenSharedFolderIdsQuery.data ?? []);
   const unseenSharedFolderItems = sharedFolderItems.filter(
     (item) => !seenSharedFolderIds.has(item.id),
   );
   const unseenSharedFolderCount = unseenSharedFolderItems.length;
-  const seenSharedFileIds = account
-    ? new Set(listSeenSharedFileIds(currentNetwork, account.address))
-    : new Set<string>();
+  const seenSharedFileIds = new Set(seenSharedFileIdsQuery.data ?? []);
   const unseenSharedFileItems = sharedFileAccessRecords.filter(
     (file) => !seenSharedFileIds.has(file.objectId),
   );
@@ -2405,13 +2468,29 @@ function App() {
   const sharedCurrentPath = selectedSharedFolder
     ? normalizeFolderPath(sharedFolderPath)
     : "/";
+  const selectedSharedFolderOwnerAddress = selectedSharedFolder?.ownerAddress ?? null;
+  const selectedSharedFolderFilesQuery = useQuery({
+    queryKey: [
+      "shared-folder-owner-files",
+      currentNetwork,
+      selectedSharedFolderOwnerAddress,
+    ],
+    enabled: Boolean(selectedSharedFolderOwnerAddress),
+    queryFn: async (): Promise<LocalWalrusFileMetadata[]> => {
+      if (!selectedSharedFolderOwnerAddress) {
+        return [];
+      }
+
+      return listLocalWalrusFileMetadata(
+        currentNetwork,
+        selectedSharedFolderOwnerAddress,
+      );
+    },
+  });
   const sharedAccessRecords = selectedSharedFolder
     ? sharedFileAccessRecords.length > 0
       ? sharedFileAccessRecords
-      : listLocalWalrusFileMetadata(
-          currentNetwork,
-          selectedSharedFolder.ownerAddress,
-        ).map((file) => ({
+      : (selectedSharedFolderFilesQuery.data ?? []).map((file) => ({
           blobId: file.blobId,
           contentType: file.contentType,
           fileName: file.fileName,
@@ -2497,16 +2576,17 @@ function App() {
       return;
     }
 
-    markSharedFileIdsSeen(
+    void markSharedFileIdsSeen(
       currentNetwork,
       account.address,
       sharedRoomFileIdsKey.split(","),
-    );
+    ).then(() => seenSharedFileIdsQuery.refetch());
   }, [
     account,
     currentNetwork,
     selectedSharedFolderId,
     sharedRoomFileIdsKey,
+    seenSharedFileIdsQuery,
   ]);
   const sharedBreadcrumbs = useMemo(() => {
     if (!selectedSharedFolder) {
@@ -4362,11 +4442,11 @@ function App() {
                                     normalizeFolderPath(item.folderPath),
                                   );
                                   if (account) {
-                                    markSharedFolderIdsSeen(
+                                    void markSharedFolderIdsSeen(
                                       currentNetwork,
                                       account.address,
                                       [item.id],
-                                    );
+                                    ).then(() => seenSharedFolderIdsQuery.refetch());
                                   }
                                 }}
                                 type="button"
