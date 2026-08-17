@@ -88,6 +88,21 @@ type BalanceRow = {
   symbol: string;
 };
 
+type UploadStage =
+  | "preparing"
+  | "uploading"
+  | "saving"
+  | "confirming"
+  | "finalizing";
+
+const UPLOAD_STAGE_LABEL: Record<UploadStage, string> = {
+  preparing: "Preparing file…",
+  uploading: "Uploading to Walrus…",
+  saving: "Saving file record…",
+  confirming: "Waiting for wallet confirmation…",
+  finalizing: "Finishing up…",
+};
+
 type UploadFeedback =
   | {
       blobId: string;
@@ -228,6 +243,7 @@ function App() {
     useState<WhitelistFeedback | null>(null);
   const [isUploadDeletable, setIsUploadDeletable] = useState(true);
   const [isUploading, setIsUploading] = useState(false);
+  const [uploadStage, setUploadStage] = useState<UploadStage | null>(null);
   const [uploadFeedback, setUploadFeedback] = useState<UploadFeedback | null>(
     null,
   );
@@ -1124,6 +1140,7 @@ function App() {
     }
 
     setIsUploading(true);
+    setUploadStage("preparing");
     setUploadError(null);
     setUploadFeedback(null);
 
@@ -1193,6 +1210,7 @@ function App() {
         searchParams.set("permanent", "true");
       }
 
+      setUploadStage("uploading");
       const response = await fetch(
         `${walrusPublisherUrl}/v1/blobs?${searchParams.toString()}`,
         {
@@ -1228,6 +1246,7 @@ function App() {
         const normalizedBlobId = normalizeBlobId(newlyCreatedBlob.blobId);
         const uploadedAt = new Date().toISOString();
 
+        setUploadStage("saving");
         await saveLocalWalrusFile(
           currentNetwork,
           account.address,
@@ -1292,6 +1311,7 @@ function App() {
         // Register SHA-256 hash on-chain so anyone can verify later.
         if (hashRegistryPackageId) {
           try {
+            setUploadStage("confirming");
             const hashTx = buildRegisterHashTransaction(
               hashRegistryPackageId,
               normalizedBlobId,
@@ -1314,6 +1334,7 @@ function App() {
           }
         }
 
+        setUploadStage("finalizing");
         await refreshWalrusFilesUntilVisible(newObjectId);
       } else {
         await walrusFilesQuery.refetch();
@@ -1339,6 +1360,7 @@ function App() {
       setUploadError(error instanceof Error ? error.message : "Upload failed");
     } finally {
       setIsUploading(false);
+      setUploadStage(null);
     }
   }
 
@@ -4011,11 +4033,28 @@ function App() {
                                   type="button"
                                 >
                                   {isUploading
-                                    ? "Uploading\u2026"
+                                    ? (uploadStage
+                                        ? UPLOAD_STAGE_LABEL[uploadStage]
+                                        : "Uploading\u2026")
                                     : effectiveUploadEncrypt
                                       ? "Encrypt & upload"
                                       : "Upload to Walrus"}
                                 </button>
+
+                                {isUploading && uploadStage ? (
+                                  <div className="upload-progress">
+                                    <span
+                                      className="spinner-sm"
+                                      aria-hidden="true"
+                                    />
+                                    <span>
+                                      {UPLOAD_STAGE_LABEL[uploadStage]}
+                                      {uploadStage === "confirming"
+                                        ? " Check your wallet to approve the transaction."
+                                        : null}
+                                    </span>
+                                  </div>
+                                ) : null}
 
                                 {effectiveUploadEncrypt && !isSealConfigured ? (
                                   <p className="feedback-error">

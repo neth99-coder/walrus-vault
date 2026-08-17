@@ -745,6 +745,29 @@
   color: #aaa;
 }
 
+.upload-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 2px 0 0;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: var(--bg-tertiary);
+  color: var(--text-secondary);
+  font-size: 0.8rem;
+}
+
+.spinner-sm {
+  flex-shrink: 0;
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid rgba(247, 88, 53, 0.2);
+  border-top-color: var(--orange-500);
+  border-radius: 50%;
+  animation: lpSpin 0.75s linear infinite;
+}
+
 .feedback-error {
   margin: 0;
   font-size: 0.83rem;
@@ -1752,8 +1775,14 @@
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   overflow: hidden;
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-default);
   border-radius: 18px;
+  background: var(--bg-secondary);
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.25);
+}
+
+[data-theme="dark"] .upload-modal {
+  border-color: rgba(255, 255, 255, 0.12);
   background: #071025;
   box-shadow:
     0 24px 80px rgba(0, 0, 0, 0.45),
@@ -1766,30 +1795,42 @@
   justify-content: space-between;
   gap: 16px;
   padding: 18px 20px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  border-bottom: 1px solid var(--border-default);
+}
+
+[data-theme="dark"] .upload-modal-header {
+  border-bottom-color: rgba(255, 255, 255, 0.08);
 }
 
 .upload-modal-eyebrow {
   margin: 0 0 4px;
-  color: var(--orange-300);
+  color: var(--orange-500);
   font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
+[data-theme="dark"] .upload-modal-eyebrow {
+  color: var(--orange-300);
+}
+
 .upload-modal h3 {
   margin: 0;
-  color: #f8fafc;
+  color: var(--text-primary);
   font-size: 1rem;
   font-weight: 700;
 }
 
+[data-theme="dark"] .upload-modal h3 {
+  color: #f8fafc;
+}
+
 .modal-close-btn {
-  border: 1px solid rgba(255, 255, 255, 0.12);
+  border: 1px solid var(--border-default);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text-inverse);
+  background: transparent;
+  color: var(--text-secondary);
   padding: 7px 12px;
   font: inherit;
   font-size: 0.78rem;
@@ -1798,6 +1839,18 @@
 }
 
 .modal-close-btn:hover {
+  border-color: rgba(247, 88, 53, 0.4);
+  background: var(--bg-tertiary);
+  color: var(--text-primary);
+}
+
+[data-theme="dark"] .modal-close-btn {
+  border-color: rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-inverse);
+}
+
+[data-theme="dark"] .modal-close-btn:hover {
   border-color: rgba(247, 88, 53, 0.4);
   background: rgba(255, 255, 255, 0.09);
   color: #ffffff;
