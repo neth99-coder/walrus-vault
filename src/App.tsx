@@ -2404,14 +2404,24 @@ function App() {
     uploadFolderPath,
     allDataRoomFolders,
   );
-  const currentRoomFiles = activeFiles.filter((file) => {
-    const metadata = getStoredLocalMetadata(file.objectId);
+  // Folder assignment lives in filesMetadataQuery, a separate network round
+  // trip from walrusFilesQuery. Until it resolves, every file's folderPath
+  // is unknown — showing them under a default "/" would flash the whole
+  // wallet's files into whichever folder loaded first, then yank them away
+  // once metadata arrives. Render nothing for that folder-assignment gap
+  // instead of a guess.
+  const isRoomContentsLoading =
+    walrusFilesQuery.isPending || filesMetadataQuery.isPending;
+  const currentRoomFiles = isRoomContentsLoading
+    ? []
+    : activeFiles.filter((file) => {
+        const metadata = getStoredLocalMetadata(file.objectId);
 
-    return (
-      normalizeFolderPath(metadata?.folderPath ?? "/") ===
-      normalizeFolderPath(uploadFolderPath)
-    );
-  });
+        return (
+          normalizeFolderPath(metadata?.folderPath ?? "/") ===
+          normalizeFolderPath(uploadFolderPath)
+        );
+      });
   const currentRoomPolicy = resolveFolderAccessPolicy(
     uploadFolderPath,
     folderPolicies,
@@ -4299,8 +4309,16 @@ function App() {
                             </div>
                           );
                         })}
-                        {currentRoomFolders.length === 0 &&
-                        currentRoomFiles.length === 0 ? (
+                        {isRoomContentsLoading ? (
+                          <p className="state-text bucket-empty">
+                            <span
+                              className="spinner-sm"
+                              aria-hidden="true"
+                            />{" "}
+                            Loading…
+                          </p>
+                        ) : currentRoomFolders.length === 0 &&
+                          currentRoomFiles.length === 0 ? (
                           <p className="state-text bucket-empty">
                             This folder is empty.
                           </p>
