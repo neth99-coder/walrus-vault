@@ -20,12 +20,12 @@ With the current UI you can:
 
 ## Architecture
 
-| Layer         | Purpose                               | Stored data                                                                                   |
-| :------------ | :------------------------------------ | :-------------------------------------------------------------------------------------------- |
-| Local storage | Local dashboard state                 | File names, blob IDs, key IDs, whitelist names, whitelist members, cap IDs                    |
-| Sui           | Access control, ownership, and hashes | Shared whitelist object, owner capability, owned Walrus blob objects, `HashRegistered` events |
-| Seal          | Key release and browser encryption    | Key shares gated by `seal_approve`                                                            |
-| Walrus        | Blob storage                          | Plain bytes or Seal-encrypted bytes                                                           |
+| Layer                         | Purpose                               | Stored data                                                                                    |
+| :---------------------------- | :------------------------------------ | :---------------------------------------------------------------------------------------------- |
+| Grist (via data-room-server)  | Dashboard state                       | File names, blob IDs, key IDs, whitelist names, whitelist members, cap IDs, folders, shares      |
+| Sui                           | Access control, ownership, and hashes | Shared whitelist object, owner capability, owned Walrus blob objects, `HashRegistered` events   |
+| Seal                          | Key release and browser encryption    | Key shares gated by `seal_approve`                                                              |
+| Walrus                        | Blob storage                          | Plain bytes or Seal-encrypted bytes                                                             |
 
 ### Sui data access
 
@@ -44,6 +44,31 @@ uses `SuiJsonRpcClient` anywhere. Instead:
 
 If you fork this app for another network, add matching entries to `GRAPHQL_URLS` in `App.tsx` (and
 `GRPC_URLS` in `dapp-kit.ts`) — only `testnet` is configured today.
+
+### Data Room backend (data-room-server)
+
+Dashboard metadata — file labels, whitelist details, folder structure, folder access policies, and
+team-sharing records — is stored in Grist and reached through a small companion backend,
+[`data-room-server`](../data-room-server), instead of the browser calling Grist directly.
+
+The frontend used to call the Grist REST API straight from the browser. That required shipping the
+Grist API key in the client bundle, and requests were blocked by CORS since the self-hosted Grist
+instance doesn't send CORS headers for this app's origin. `data-room-server` proxies those calls
+instead: the Grist API key lives only in the backend's environment, and the backend sets CORS
+headers for the frontend's origin.
+
+Run it locally:
+
+```bash
+cd ../data-room-server
+npm install
+npm run dev   # http://localhost:3001
+```
+
+Then point this app at it via `VITE_DATA_ROOM_SERVER_URL` (see
+[Environment variables](#environment-variables)). See
+[`data-room-server`'s README](../data-room-server/README.md) for endpoints, Docker/Compose usage,
+and Grist table setup.
 
 ## Supported wallets
 
@@ -67,7 +92,7 @@ If you fork this app for another network, add matching entries to `GRAPHQL_URLS`
 - Each whitelist maps to one shared `Whitelist` object and one owned `Cap` object on Sui.
 - The creator is added to the whitelist automatically during creation.
 - Members can be added or removed from the whitelist from the dashboard.
-- Whitelist display metadata is stored locally per wallet.
+- Whitelist display metadata is stored in Grist, scoped per wallet address and network.
 
 ### Uploads
 
@@ -83,7 +108,7 @@ After every successful upload (plain or encrypted), the app:
 
 This step is non-fatal — if the hash-registration transaction fails, the Walrus upload is still considered successful.
 
-For encrypted uploads, the app also saves local metadata needed by the dashboard:
+For encrypted uploads, the app also saves metadata to Grist needed by the dashboard:
 
 - `fileName`
 - `blobId`
@@ -97,8 +122,8 @@ For encrypted uploads, the app also saves local metadata needed by the dashboard
 ### File discovery
 
 - Walrus files are discovered from Sui-owned Walrus blob objects.
-- File metadata is not read from on-chain blob attributes; the dashboard is local-first.
-- Dashboard labels and whitelist associations are stored in browser local storage per wallet.
+- File metadata is not read from on-chain blob attributes; it's stored separately in Grist.
+- Dashboard labels and whitelist associations are stored in Grist (via data-room-server), scoped per wallet address and network.
 
 ### Downloads
 
@@ -107,16 +132,18 @@ For encrypted uploads, the app also saves local metadata needed by the dashboard
 
 ### Shared access
 
-There is no backend database for sharing.
+Sharing metadata (whitelist membership, folder-to-team assignments, and shared-file records) is
+stored in Grist via `data-room-server`, not browser localStorage — so it's visible to a recipient
+wallet regardless of which browser or device they use to open the app.
 
-To share an encrypted file, the owner:
+To share an encrypted file directly, the owner:
 
 1. Adds the recipient wallet to the whitelist on Sui.
 2. Shares the `blobId` and `keyId` out-of-band.
 
 The recipient can then use the **Shared Access** section to decrypt the file if their connected wallet is currently allowed.
 
-Team-folder sharing (Data Room → Shared tab) is different: when a folder is assigned to a team, or a new member is added to a team with folders assigned, the app writes a local "shared with you" record for each member directly to `localStorage` — no out-of-band step needed, but only if the member later opens the app **in the same browser** (there's still no backend, so this record never leaves the browser it was written in). A small notification dot appears on the **Data Room** nav item and the **Shared** tab whenever there are shared folders the current wallet hasn't opened yet; opening the Shared tab marks them as seen (tracked per-wallet in `localStorage`, independent of the shared-folder records themselves).
+Team-folder sharing (Data Room → Shared tab) is different: when a folder is assigned to a team, or a new member is added to a team with folders assigned, the app writes a "shared with you" record for each member to Grist — no out-of-band step needed, and it's visible as soon as the member opens the app with that wallet, on any device. A small notification dot appears on the **Data Room** nav item and the **Shared** tab whenever there are shared folders the current wallet hasn't opened yet; opening the Shared tab marks them as seen (tracked per-wallet in Grist, independent of the shared-folder records themselves).
 
 ### Document verification
 
@@ -139,7 +166,8 @@ src/
   deletedBlobHistory.ts    — reconstructs deleted-blob history from an address's sent transactions via GraphQL
   enokiSession.ts          — Enoki session helpers
   fileHash.ts              — browser-native SHA-256 via Web Crypto API
-  localWalrusMetadata.ts   — local storage model for files, deleted entries, and whitelists
+  gristClient.ts           — thin fetch wrapper around the data-room-server API (list/upsert/delete records)
+  gristMetadata.ts         — Grist-backed model for files, deleted entries, whitelists, folders, and sharing records
   RegisterEnokiWallets.tsx — Enoki wallet registration for the Google login path
   seal.ts                  — Seal client helpers (encrypt, approve PTB, session keys, decrypt)
   walrus.ts                — Walrus helpers, blob parsing, aggregator URLs, upload/download
@@ -149,6 +177,8 @@ move/
       whitelist.move           — Seal allowlist policy (seal_approve, member management)
       blob_hash_registry.move  — SHA-256 hash registry (register_hash entry, HashRegistered event)
 ```
+
+See [`../data-room-server`](../data-room-server) for the backend that proxies Grist for this app.
 
 ## Prerequisites
 
@@ -161,6 +191,7 @@ You need:
 - a Google OAuth client ID if you want to use Enoki login
 - an Enoki app and public API key if you want to use Enoki login
 - a published `walrus_vault_policy` Move package for encrypted uploads, whitelist management, and hash registration
+- the [`data-room-server`](../data-room-server) backend running, with its own `.env` pointed at your Grist doc — required for the dashboard (file/whitelist/folder/sharing metadata) to load
 
 ## Git push protection
 
@@ -185,12 +216,14 @@ VITE_ENOKI_API_KEY=your_enoki_public_api_key
 VITE_GOOGLE_CLIENT_ID=your_google_oauth_web_client_id
 VITE_WALRUS_PUBLISHER_URL=https://publisher.walrus-testnet.walrus.space
 VITE_WALRUS_AGGREGATOR_URL=https://aggregator.walrus-testnet.walrus.space
+VITE_DATA_ROOM_SERVER_URL=http://localhost:3001
 ```
 
 Notes:
 
 - `VITE_ENOKI_API_KEY` and `VITE_GOOGLE_CLIENT_ID` are required by the current app startup flow.
 - `VITE_WALRUS_PUBLISHER_URL` and `VITE_WALRUS_AGGREGATOR_URL` are optional and fall back to Walrus testnet defaults.
+- `VITE_DATA_ROOM_SERVER_URL` points at the [`data-room-server`](../data-room-server) backend and is required for dashboard metadata (files, whitelists, folders, sharing) to load — see [Data Room backend](#data-room-backend-data-room-server) above.
 - The published `walrus_vault_policy` package IDs are **hardcoded** as `sealPolicyPackageId` and `hashRegistryPackageId` near the top of `src/App.tsx` rather than read from env. If you publish your own package (see below), update those two constants and rebuild.
 
 ## Enoki setup
@@ -324,14 +357,14 @@ You can enter through either path:
 1. Google via Enoki.
 2. Browser wallet, with Slush preferred if present.
 
-Once connected, the app loads balances, owned Walrus blobs, local file metadata, and local whitelist metadata for that wallet.
+Once connected, the app loads balances, owned Walrus blobs, and Grist-backed file and whitelist metadata for that wallet.
 
 ### Create a whitelist
 
 1. Enter a whitelist name in the UI.
 2. The app calls `create_whitelist_entry`.
 3. The shared whitelist ID and owned cap ID are read from the transaction result.
-4. The whitelist is saved to local storage for the connected wallet.
+4. The whitelist is saved to Grist for the connected wallet.
 5. The creator remains on the whitelist by default.
 
 ### Add or remove members
@@ -349,7 +382,7 @@ Once connected, the app loads balances, owned Walrus blobs, local file metadata,
 4. If encryption is enabled, the file is encrypted with Seal; otherwise raw bytes are uploaded.
 5. The file is uploaded to Walrus via the publisher endpoint.
 6. The app submits a `register_hash` transaction on Sui to record the hash on-chain.
-7. Local metadata is saved so the owner dashboard can manage the file later.
+7. Metadata is saved to Grist so the owner dashboard can manage the file later.
 
 ### Download an encrypted file
 
@@ -366,19 +399,19 @@ Once connected, the app loads balances, owned Walrus blobs, local file metadata,
 4. It queries all `HashRegistered` events on Sui (no gas, no login).
 5. A match shows the uploader, blob ID, object ID, and registration timestamp. No match means the file was never registered or has been modified.
 
-## Local storage notes
+## Dashboard metadata notes
 
-The dashboard is intentionally local-first.
+Dashboard state (file labels, whitelist metadata, folder structure, and sharing records) lives in
+Grist, reached through the `data-room-server` backend — not in browser localStorage.
 
-- Clearing browser storage removes local file and whitelist labels.
+- Metadata persists across browsers and devices for the same wallet address; it isn't tied to one browser's local storage.
 - Walrus blobs remain on Walrus.
 - Access control and hash records remain on Sui.
-- If local metadata is lost, you still need the correct `keyId` to decrypt an encrypted file.
-- Whitelists are loaded from wallet-scoped local storage, not discovered from chain state.
+- If Grist metadata is lost or wiped, you still need the correct `keyId` to decrypt an encrypted file.
+- Whitelists are loaded from Grist, scoped by wallet address and network — not discovered from chain state.
 
 ## Known issues
 
-- Enoki integration currently hits `InvalidUserSignatureError` when decrypting encrypted files through the Seal flow. The same decrypt path succeeds with Slush, which points to a zkLogin or server-side compatibility issue rather than a frontend certificate-construction issue.
 - On some Android phones, the dApp flow unexpectedly asks for camera permissions. That is not expected behavior for this app and is currently under investigation.
 
 ## Troubleshooting
